@@ -21,12 +21,11 @@ using Foundatio.Repositories.Models;
 using Foundatio.Utility;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace Exceptionless.Core.Jobs {
     [Job(Description = "Sends daily summary emails.", InitialDelay = "1m", Interval = "1h")]
     public class DailySummaryJob : JobWithLockBase, IHealthCheck {
-        private readonly IOptions<EmailOptions> _emailOptions;
+        private readonly EmailOptions _emailOptions;
         private readonly IProjectRepository _projectRepository;
         private readonly IOrganizationRepository _organizationRepository;
         private readonly IUserRepository _userRepository;
@@ -37,7 +36,7 @@ namespace Exceptionless.Core.Jobs {
         private readonly ILockProvider _lockProvider;
         private DateTime? _lastRun;
 
-        public DailySummaryJob(IOptions<EmailOptions> emailOptions, IProjectRepository projectRepository, IOrganizationRepository organizationRepository, IUserRepository userRepository, IStackRepository stackRepository, IEventRepository eventRepository, IMailer mailer, ICacheClient cacheClient, BillingPlans plans, ILoggerFactory loggerFactory = null) : base(loggerFactory) {
+        public DailySummaryJob(EmailOptions emailOptions, IProjectRepository projectRepository, IOrganizationRepository organizationRepository, IUserRepository userRepository, IStackRepository stackRepository, IEventRepository eventRepository, IMailer mailer, ICacheClient cacheClient, BillingPlans plans, ILoggerFactory loggerFactory = null) : base(loggerFactory) {
             _emailOptions = emailOptions;
             _projectRepository = projectRepository;
             _organizationRepository = organizationRepository;
@@ -56,7 +55,7 @@ namespace Exceptionless.Core.Jobs {
         protected override async Task<JobResult> RunInternalAsync(JobContext context) {
             _lastRun = SystemClock.UtcNow;
             
-            if (!_emailOptions.Value.EnableDailySummary || _mailer == null)
+            if (!_emailOptions.EnableDailySummary || _mailer == null)
                 return JobResult.SuccessWithMessage("Summary notifications are disabled.");
 
             var results = await _projectRepository.GetByNextSummaryNotificationOffsetAsync(9).AnyContext();
@@ -134,9 +133,9 @@ namespace Exceptionless.Core.Jobs {
             }
 
             _logger.LogInformation("Sending daily summary: users={UserCount} project={project}", users.Count, project.Id);
-            var sf = new ExceptionlessSystemFilter(project, organization);
-            var systemFilter = new RepositoryQuery<PersistentEvent>().SystemFilter(sf).DateRange(data.UtcStartTime, data.UtcEndTime, (PersistentEvent e) => e.Date).Index(data.UtcStartTime, data.UtcEndTime);
-            string filter = $"{EventIndexType.Alias.Type}:{Event.KnownTypes.Error} {EventIndexType.Alias.IsHidden}:false {EventIndexType.Alias.IsFixed}:false";
+            var sf = new AppFilter(project, organization);
+            var systemFilter = new RepositoryQuery<PersistentEvent>().AppFilter(sf).DateRange(data.UtcStartTime, data.UtcEndTime, (PersistentEvent e) => e.Date).Index(data.UtcStartTime, data.UtcEndTime);
+            string filter = $"{EventIndex.Alias.Type}:{Event.KnownTypes.Error} {EventIndex.Alias.IsHidden}:false {EventIndex.Alias.IsFixed}:false";
             var result = await _eventRepository.CountBySearchAsync(systemFilter, filter, "terms:(first @include:true) terms:(stack_id~3) cardinality:stack_id sum:count~1").AnyContext();
 
             double total = result.Aggregations.Sum("sum_count")?.Value ?? result.Total;
@@ -145,7 +144,7 @@ namespace Exceptionless.Core.Jobs {
             bool hasSubmittedEvents = total > 0 || project.IsConfigured.GetValueOrDefault();
             bool isFreePlan = organization.PlanId == _plans.FreePlan.Id;
 
-            string fixedFilter = $"{EventIndexType.Alias.Type}:{Event.KnownTypes.Error} {EventIndexType.Alias.IsHidden}:false {EventIndexType.Alias.IsFixed}:true";
+            string fixedFilter = $"{EventIndex.Alias.Type}:{Event.KnownTypes.Error} {EventIndex.Alias.IsHidden}:false {EventIndex.Alias.IsFixed}:true";
             var fixedResult = await _eventRepository.CountBySearchAsync(systemFilter, fixedFilter, "sum:count~1").AnyContext();
             double fixedTotal = fixedResult.Aggregations.Sum("sum_count")?.Value ?? fixedResult.Total;
 

@@ -11,39 +11,44 @@ using Exceptionless.Core.Models.Data;
 using Exceptionless.Core.Plugins.EventProcessor;
 using Exceptionless.Core.Plugins.EventProcessor.Default;
 using Exceptionless.Core.Utility;
+using Exceptionless.Insulation.Geo;
 using Exceptionless.Tests.Utility;
 using Foundatio.Caching;
 using Foundatio.Storage;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace Exceptionless.Tests.Plugins {
-    public class GeoTests : TestWithServices {
+    public sealed class GeoTests : TestWithServices {
         private const string GREEN_BAY_COORDINATES = "44.5458,-88.1019";
         private const string GREEN_BAY_IP = "24.208.86.80";
         private const string IRVING_COORDINATES = "32.8489,-96.9667";
         private const string IRVING_IP = "192.91.253.248";
         private readonly BillingManager _billingManager;
         private readonly BillingPlans _plans;
-        private readonly IOptions<AppOptions> _options;
+        private readonly AppOptions _options;
 
         public GeoTests(ServicesFixture fixture, ITestOutputHelper output) : base(fixture, output) {
             _billingManager = GetService<BillingManager>();
             _plans = GetService<BillingPlans>();
-            _options = GetService<IOptions<AppOptions>>();
+            _options = GetService<AppOptions>();
         }
-
+        
         private async Task<IGeoIpService> GetResolverAsync(ILoggerFactory loggerFactory) {
+            if (String.IsNullOrEmpty(_options.MaxMindGeoIpKey)) {
+                _logger.LogInformation("Configure {SettingKey} to run geo tests.", nameof(AppOptions.MaxMindGeoIpKey));
+                return new NullGeoIpService();
+            }
+
             string dataDirectory = PathHelper.ExpandPath(".\\");
             var storage = new FolderFileStorage(new FolderFileStorageOptions {
                 Folder = dataDirectory,
                 LoggerFactory = loggerFactory
             });
 
-            if (!await storage.ExistsAsync(MaxMindGeoIpService.GEO_IP_DATABASE_PATH)) {
-                var job = new DownloadGeoIPDatabaseJob(GetService<ICacheClient>(), storage, loggerFactory);
+            if (!await storage.ExistsAsync(DownloadGeoIPDatabaseJob.GEO_IP_DATABASE_PATH)) {
+                var job = new DownloadGeoIPDatabaseJob(_options, GetService<ICacheClient>(), storage, loggerFactory);
                 var result = await job.RunAsync();
                 Assert.NotNull(result);
                 Assert.True(result.IsSuccess);
@@ -54,7 +59,11 @@ namespace Exceptionless.Tests.Plugins {
 
         [Fact]
         public async Task WillNotSetLocation() {
-            var plugin = new GeoPlugin(await GetResolverAsync(Log), _options);
+            var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
+            var plugin = new GeoPlugin(resolver, _options);
             var ev = new PersistentEvent { Geo = GREEN_BAY_COORDINATES };
             await plugin.EventBatchProcessingAsync(new List<EventContext> { new EventContext(ev, OrganizationData.GenerateSampleOrganization(_billingManager, _plans), ProjectData.GenerateSampleProject()) });
 
@@ -69,8 +78,11 @@ namespace Exceptionless.Tests.Plugins {
         [InlineData("x,y")]
         [InlineData("190,180")]
         public async Task WillResetLocation(string geo) {
-            var plugin = new GeoPlugin(await GetResolverAsync(Log), _options);
-
+            var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
+            var plugin = new GeoPlugin(resolver, _options);
             var ev = new PersistentEvent { Geo = geo };
             await plugin.EventBatchProcessingAsync(new List<EventContext> { new EventContext(ev, OrganizationData.GenerateSampleOrganization(_billingManager, _plans), ProjectData.GenerateSampleProject()) });
 
@@ -80,7 +92,11 @@ namespace Exceptionless.Tests.Plugins {
 
         [Fact]
         public async Task WillSetLocationFromGeo() {
-            var plugin = new GeoPlugin(await GetResolverAsync(Log), _options);
+            var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
+            var plugin = new GeoPlugin(resolver, _options);
             var ev = new PersistentEvent { Geo = GREEN_BAY_IP };
             await plugin.EventBatchProcessingAsync(new List<EventContext> { new EventContext(ev, OrganizationData.GenerateSampleOrganization(_billingManager, _plans), ProjectData.GenerateSampleProject()) });
 
@@ -95,7 +111,11 @@ namespace Exceptionless.Tests.Plugins {
 
         [Fact]
         public async Task WillSetLocationFromRequestInfo() {
-            var plugin = new GeoPlugin(await GetResolverAsync(Log), _options);
+            var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
+            var plugin = new GeoPlugin(resolver, _options);
             var ev = new PersistentEvent();
             ev.AddRequestInfo(new RequestInfo { ClientIpAddress = GREEN_BAY_IP });
             await plugin.EventBatchProcessingAsync(new List<EventContext> { new EventContext(ev, OrganizationData.GenerateSampleOrganization(_billingManager, _plans), ProjectData.GenerateSampleProject()) });
@@ -110,7 +130,11 @@ namespace Exceptionless.Tests.Plugins {
 
         [Fact]
         public async Task WillSetLocationFromEnvironmentInfoInfo() {
-            var plugin = new GeoPlugin(await GetResolverAsync(Log), _options);
+            var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
+            var plugin = new GeoPlugin(resolver, _options);
             var ev = new PersistentEvent();
             ev.SetEnvironmentInfo(new EnvironmentInfo { IpAddress = $"127.0.0.1,{GREEN_BAY_IP}" });
             await plugin.EventBatchProcessingAsync(new List<EventContext> { new EventContext(ev, OrganizationData.GenerateSampleOrganization(_billingManager, _plans), ProjectData.GenerateSampleProject()) });
@@ -125,7 +149,11 @@ namespace Exceptionless.Tests.Plugins {
 
         [Fact]
         public async Task WillSetFromSingleGeo() {
-            var plugin = new GeoPlugin(await GetResolverAsync(Log), _options);
+            var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
+            var plugin = new GeoPlugin(resolver, _options);
 
             var contexts = new List<EventContext> {
                 new EventContext(new PersistentEvent { Geo = GREEN_BAY_IP }, OrganizationData.GenerateSampleOrganization(_billingManager, _plans), ProjectData.GenerateSampleProject()),
@@ -146,7 +174,11 @@ namespace Exceptionless.Tests.Plugins {
 
         [Fact]
         public async Task WillNotSetFromMultipleGeo() {
-            var plugin = new GeoPlugin(await GetResolverAsync(Log), _options);
+            var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
+            var plugin = new GeoPlugin(resolver, _options);
 
             var ev = new PersistentEvent();
             var greenBayEvent = new PersistentEvent { Geo = GREEN_BAY_IP };
@@ -186,7 +218,11 @@ namespace Exceptionless.Tests.Plugins {
 
         [Fact]
         public async Task WillSetMultipleFromEmptyGeo() {
-            var plugin = new GeoPlugin(await GetResolverAsync(Log), _options);
+            var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
+            var plugin = new GeoPlugin(resolver, _options);
 
             var ev = new PersistentEvent();
             var greenBayEvent = new PersistentEvent();
@@ -216,6 +252,9 @@ namespace Exceptionless.Tests.Plugins {
         [MemberData(nameof(IPData))]
         public async Task CanResolveIpAsync(string ip, bool canResolve) {
             var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
+            
             var result = await resolver.ResolveIpAsync(ip);
             if (canResolve)
                 Assert.NotNull(result);
@@ -226,6 +265,8 @@ namespace Exceptionless.Tests.Plugins {
         [Fact]
         public async Task CanResolveIpFromCacheAsync() {
             var resolver = await GetResolverAsync(Log);
+            if (resolver is NullGeoIpService)
+                return;
 
             // Load the database
             await resolver.ResolveIpAsync("0.0.0.0");

@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Exceptionless.Core.Extensions;
@@ -22,7 +21,7 @@ namespace Exceptionless.Insulation.HealthChecks {
             var sw = Stopwatch.StartNew();
             
             try {
-                var response = await _config.Client.PingAsync(cancellationToken: cancellationToken).AnyContext();
+                var response = await _config.Client.PingAsync(ct: cancellationToken).AnyContext();
                 if (!response.IsValid)
                     return HealthCheckResult.Unhealthy("Elasticsearch Ping Failed", response.OriginalException);
             } catch (Exception ex) {

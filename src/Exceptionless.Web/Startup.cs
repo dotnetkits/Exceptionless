@@ -11,26 +11,27 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Cors.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
-using Swashbuckle.AspNetCore.Swagger;
 using Joonasw.AspNetCore.SecurityHeaders;
 using System.Collections.Generic;
 using Exceptionless.Web.Extensions;
 using Foundatio.Hosting.Startup;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.StaticFiles;
-using Microsoft.Extensions.Options;
+using Microsoft.OpenApi.Models;
+using Newtonsoft.Json;
+using Serilog;
+using Serilog.Events;
+using Microsoft.Extensions.Configuration;
 
 namespace Exceptionless.Web {
     public class Startup {
-        public Startup(ILoggerFactory loggerFactory) {
-            LoggerFactory = loggerFactory;
+        public Startup(IConfiguration configuration) {
+            Configuration = configuration;
         }
 
-        public ILoggerFactory LoggerFactory { get; }
+        public IConfiguration Configuration { get; }
 
         public void ConfigureServices(IServiceCollection services) {
             services.AddCors(b => b.AddPolicy("AllowAny", p => p
@@ -45,19 +46,12 @@ namespace Exceptionless.Web {
                 options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
                 options.RequireHeaderSymmetry = false;
             });
-            services.AddMvcCore(o => {
-                o.Filters.Add(new CorsAuthorizationFilterFactory("AllowAny"));
+
+            services.AddControllers(o => {
                 o.Filters.Add<ApiExceptionFilter>();
                 o.ModelBinderProviders.Insert(0, new CustomAttributesModelBinderProvider());
                 o.InputFormatters.Insert(0, new RawRequestBodyFormatter());
-            }).SetCompatibilityVersion(CompatibilityVersion.Version_2_2)
-              .AddApiExplorer()
-              .AddAuthorization()
-              .AddFormatterMappings()
-              .AddDataAnnotations()
-              .AddJsonFormatters()
-              .AddCors()
-              .AddJsonOptions(o => {
+            }).AddNewtonsoftJson(o => {
                 o.SerializerSettings.DefaultValueHandling = DefaultValueHandling.Include;
                 o.SerializerSettings.NullValueHandling = NullValueHandling.Include;
                 o.SerializerSettings.Formatting = Formatting.Indented;
@@ -82,48 +76,71 @@ namespace Exceptionless.Web {
                 r.ConstraintMap.Add("tokens", typeof(TokensRouteConstraint));
             });
             services.AddSwaggerGen(c => {
-                c.SwaggerDoc("v2", new Info {
+                c.SwaggerDoc("v2", new OpenApiInfo {
                     Title = "Exceptionless API",
                     Version = "v2"
                 });
 
-                c.AddSecurityDefinition("Bearer", new ApiKeyScheme {
+                c.AddSecurityDefinition("Basic", new OpenApiSecurityScheme {
+                    Description = "Basic HTTP Authentication",
+                    Scheme = "basic",
+                    Type = SecuritySchemeType.Http
+                });
+                c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme {
                     Description = "Authorization token. Example: \"Bearer {apikey}\"",
-                    Name = "Authorization",
-                    In = "header",
-                    Type = "apiKey",
+                    Scheme = "bearer",
+                    Type = SecuritySchemeType.Http
                 });
-                c.AddSecurityDefinition("Basic", new BasicAuthScheme {
-                    Type = "basic",
-                    Description = "Basic HTTP Authentication"
-                });
-                c.AddSecurityRequirement(new Dictionary<string, IEnumerable<string>> {
-                    { "Basic", new string[] { } },
-                    { "Bearer", new string[] { } }
+                c.AddSecurityDefinition("Token", new OpenApiSecurityScheme {
+                    Description = "Authorization token. Example: \"Bearer {apikey}\"",
+                    Name = "access_token",
+                    In = ParameterLocation.Query,
+                    Type = SecuritySchemeType.ApiKey
                 });
                 
-                c.OperationFilter<ExceptionlessOperationFilter>();
-
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement {
+                    {
+                        new OpenApiSecurityScheme {
+                            Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Basic" }
+                        },
+                        new string[0]
+                    },
+                    {
+                        new OpenApiSecurityScheme {
+                            Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+                        },
+                        new string[0]
+                    },
+                    {
+                        new OpenApiSecurityScheme {
+                            Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Token" }
+                        },
+                        new string[0]
+                    }
+                });
+                
                 if (File.Exists($@"{AppDomain.CurrentDomain.BaseDirectory}\Exceptionless.Web.xml"))
                     c.IncludeXmlComments($@"{AppDomain.CurrentDomain.BaseDirectory}\Exceptionless.Web.xml");
                 
                 c.IgnoreObsoleteActions();
             });
-            
-            Bootstrapper.RegisterServices(services, LoggerFactory);
+
+            var appOptions = AppOptions.ReadFromConfiguration(Configuration);
+            Bootstrapper.RegisterServices(services, appOptions, Log.Logger.ToLoggerFactory());
             services.AddSingleton(s => {
-                var settings = s.GetRequiredService<IOptions<AppOptions>>().Value;
                 return new ThrottlingOptions {
-                    MaxRequestsForUserIdentifierFunc = userIdentifier => settings.ApiThrottleLimit,
+                    MaxRequestsForUserIdentifierFunc = userIdentifier => appOptions.ApiThrottleLimit,
                     Period = TimeSpan.FromMinutes(15)
                 };
             });
         }
 
         public void Configure(IApplicationBuilder app) {
-            var options = app.ApplicationServices.GetRequiredService<IOptions<AppOptions>>().Value;
-            Core.Bootstrapper.LogConfiguration(app.ApplicationServices, options, LoggerFactory.CreateLogger<Startup>());
+            var options = app.ApplicationServices.GetRequiredService<AppOptions>();
+            Core.Bootstrapper.LogConfiguration(app.ApplicationServices, options, Log.Logger.ToLoggerFactory().CreateLogger<Startup>());
 
+            app.UseMiddleware<AllowSynchronousIOMiddleware>();
+            
             if (!String.IsNullOrEmpty(options.ExceptionlessApiKey) && !String.IsNullOrEmpty(options.ExceptionlessServerUrl))
                 app.UseExceptionless(ExceptionlessClient.Default);
 
@@ -139,24 +156,34 @@ namespace Exceptionless.Web {
             
             app.UseCsp(csp => {
                 csp.ByDefaultAllow.FromSelf()
-                    .From("https://js.stripe.com");
+                    .From("https://js.stripe.com")
+                    .From("http://js.stripe.com");
                 csp.AllowFonts.FromSelf()
                     .From("https://fonts.gstatic.com")
-                    .From("https://maxcdn.bootstrapcdn.com");
+                    .From("http://fonts.gstatic.com")
+                    .From("https://maxcdn.bootstrapcdn.com")
+                    .From("http://maxcdn.bootstrapcdn.com");
                 csp.AllowImages.FromSelf()
                     .From("data:")
                     .From("https://q.stripe.com")
-                    .From("https://www.gravatar.com");
+                    .From("http://q.stripe.com")
+                    .From("https://www.gravatar.com")
+                    .From("http://www.gravatar.com");
                 csp.AllowScripts.FromSelf()
                     .AllowUnsafeInline()
                     .AllowUnsafeEval()
                     .From("https://cdnjs.cloudflare.com")
+                    .From("http://cdnjs.cloudflare.com")
                     .From("https://js.stripe.com")
-                    .From("https://maxcdn.bootstrapcdn.com");
+                    .From("http://js.stripe.com")
+                    .From("https://maxcdn.bootstrapcdn.com")
+                    .From("http://maxcdn.bootstrapcdn.com");
                 csp.AllowStyles.FromSelf()
                     .AllowUnsafeInline()
                     .From("https://fonts.googleapis.com")
-                    .From("https://maxcdn.bootstrapcdn.com");
+                    .From("http://fonts.googleapis.com")
+                    .From("https://maxcdn.bootstrapcdn.com")
+                    .From("http://maxcdn.bootstrapcdn.com");
             });
 
             app.Use(async (context, next) => {
@@ -167,14 +194,40 @@ namespace Exceptionless.Web {
                 context.Response.Headers.Add("X-Content-Type-Options", "nosniff");
                 context.Response.Headers.Add("X-Frame-Options", "DENY");
                 context.Response.Headers.Add("X-XSS-Protection", "1; mode=block");
+                context.Response.Headers.Remove("X-Powered-By");
 
                 await next();
             });
 
+            app.UseSerilogRequestLogging(o => o.GetLevel = (context, duration, ex) => {
+                if (ex != null || context.Response.StatusCode > 499)
+                    return LogEventLevel.Error;
+                
+                if (context.Response.StatusCode > 399)
+                    return LogEventLevel.Information;
+                
+                if (duration < 1000 || context.Request.Path.StartsWithSegments("/api/v2/push"))
+                    return LogEventLevel.Debug;
+
+                return LogEventLevel.Information;
+            });
+            app.UseStaticFiles(new StaticFileOptions {
+                ContentTypeProvider = new FileExtensionContentTypeProvider {
+                    Mappings = {
+                        [".less"] = "plain/text"
+                    }
+                }
+            });
+
+            app.UseDefaultFiles();
+            app.UseFileServer();
+            app.UseRouting();
             app.UseCors("AllowAny");
             app.UseHttpMethodOverride();
             app.UseForwardedHeaders();
+            
             app.UseAuthentication();
+            app.UseAuthorization();
             
             app.UseMiddleware<ProjectConfigMiddleware>();
             app.UseMiddleware<RecordSessionHeartbeatMiddleware>();
@@ -186,17 +239,7 @@ namespace Exceptionless.Web {
 
             // Reject event posts in organizations over their max event limits.
             app.UseMiddleware<OverageMiddleware>();
-            
-            app.UseStaticFiles(new StaticFileOptions {
-                ContentTypeProvider = new FileExtensionContentTypeProvider {
-                    Mappings = {
-                        [".less"] = "plain/text"
-                    }
-                }
-            });
-            
-            app.UseFileServer();
-            app.UseMvc();
+
             app.UseSwagger(c => {
                 c.RouteTemplate = "docs/{documentName}/swagger.json";
             });
@@ -210,6 +253,11 @@ namespace Exceptionless.Web {
                 app.UseWebSockets();
                 app.UseMiddleware<MessageBusBrokerMiddleware>();
             }
+            
+            app.UseEndpoints(endpoints => {
+                endpoints.MapControllers();
+                endpoints.MapFallbackToFile("{**slug:nonfile}", "index.html");
+            });
         }
     }
 }

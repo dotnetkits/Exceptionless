@@ -7,7 +7,6 @@ using Exceptionless.Core.Repositories;
 using Exceptionless.Core.Models;
 using Exceptionless.Core.Repositories.Queries;
 using Exceptionless.DateTimeExtensions;
-using Exceptionless.Web.Security;
 using Exceptionless.Web.Utility;
 using Exceptionless.Web.Utility.Results;
 using Foundatio.Repositories;
@@ -15,7 +14,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Exceptionless.Web.Controllers {
-  [ApiController]
+    [Produces("application/json")]
+    [ApiController]
     public abstract class ExceptionlessApiController : Controller {
         public const string API_PREFIX = "api/v2";
         protected const int DEFAULT_LIMIT = 10;
@@ -138,7 +138,7 @@ namespace Exceptionless.Web.Controllers {
             return organizations.ToList().AsReadOnly();
         }
 
-        protected bool ShouldApplySystemFilter(ExceptionlessSystemFilter sf, string filter) {
+        protected bool ShouldApplySystemFilter(AppFilter sf, string filter) {
             // Apply filter to non admin user.
             if (!Request.IsGlobalAdmin())
                 return true;

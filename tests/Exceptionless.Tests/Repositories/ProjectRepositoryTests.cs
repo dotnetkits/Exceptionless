@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Exceptionless.Core.Billing;
@@ -11,7 +12,7 @@ using Foundatio.Caching;
 using Xunit;
 using Xunit.Abstractions;
 using Foundatio.Repositories;
-using LogLevel = Microsoft.Extensions.Logging.LogLevel;
+using Foundatio.Repositories.Models;
 
 namespace Exceptionless.Tests.Repositories {
     public sealed class ProjectRepositoryTests : IntegrationTestsBase {
@@ -87,25 +88,25 @@ namespace Exceptionless.Tests.Repositories {
             var project1 = await _repository.AddAsync(ProjectData.GenerateProject(id: TestConstants.ProjectId, organizationId: organization1.Id, name: "One"), o => o.ImmediateConsistency());
             var project2 = await _repository.AddAsync(ProjectData.GenerateProject(id: TestConstants.SuspendedProjectId, organizationId: organization1.Id, name: "Two"), o => o.ImmediateConsistency());
 
-            var results = await _repository.GetByFilterAsync(new ExceptionlessSystemFilter(organizations), null, null);
+            var results = await _repository.GetByFilterAsync(new AppFilter(organizations), null, null);
             Assert.NotNull(results);
             Assert.Equal(2, results.Documents.Count);
 
-            results = await _repository.GetByFilterAsync(new ExceptionlessSystemFilter(organization1), null, null);
+            results = await _repository.GetByFilterAsync(new AppFilter(organization1), null, null);
             Assert.NotNull(results);
             Assert.Equal(2, results.Documents.Count);
 
-            results = await _repository.GetByFilterAsync(new ExceptionlessSystemFilter(organization2), null, null);
+            results = await _repository.GetByFilterAsync(new AppFilter(organization2), null, null);
             Assert.NotNull(results);
             Assert.Empty(results.Documents);
             
-            results = await _repository.GetByFilterAsync(new ExceptionlessSystemFilter(organization1), "name:one", null);
+            results = await _repository.GetByFilterAsync(new AppFilter(organization1), "name:one", null);
             Assert.NotNull(results);
             Assert.Single(results.Documents);
             Assert.Equal(project1.Name, results.Documents.Single().Name);
 
             await _repository.RemoveAsync(project2.Id, o => o.Notifications(false).ImmediateConsistency());
-            results = await _repository.GetByFilterAsync(new ExceptionlessSystemFilter(organization1), null, null);
+            results = await _repository.GetByFilterAsync(new AppFilter(organization1), null, null);
             Assert.NotNull(results);
             Assert.Single(results.Documents);
             await _repository.RemoveAllAsync(o => o.Notifications(false));
@@ -129,8 +130,9 @@ namespace Exceptionless.Tests.Repositories {
             var actualToken = actual.GetSlackToken();
             Assert.Equal(token.AccessToken, actualToken?.AccessToken);
 
-            var actualCache = await _cache.GetAsync<Project>("Project:" + project.Id);
-            Assert.Equal(project.Name, actualCache.Value?.Name);
+            var actualCache = await _cache.GetAsync<ICollection<FindHit<Project>>>("Project:" + project.Id);
+            Assert.True(actualCache.HasValue);
+            Assert.Equal(project.Name, actualCache.Value.Single().Document.Name);
             var actualCacheToken = actual.GetSlackToken();
             Assert.Equal(token.AccessToken, actualCacheToken?.AccessToken);
         }

@@ -11,7 +11,6 @@ using Foundatio.Queues;
 using Foundatio.Utility;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 
 namespace Exceptionless.Web.Controllers {
     [Route(API_PREFIX)]
@@ -25,7 +24,7 @@ namespace Exceptionless.Web.Controllers {
         private readonly IQueue<EventNotificationWorkItem> _notificationQueue;
         private readonly IQueue<WebHookNotification> _webHooksQueue;
         private readonly IQueue<EventUserDescription> _userDescriptionQueue;
-        private readonly IOptions<AppOptions> _appOptions;
+        private readonly AppOptions _appOptions;
 
         public StatusController(
             ICacheClient cacheClient,
@@ -35,7 +34,7 @@ namespace Exceptionless.Web.Controllers {
             IQueue<EventNotificationWorkItem> notificationQueue,
             IQueue<WebHookNotification> webHooksQueue,
             IQueue<EventUserDescription> userDescriptionQueue,
-            IOptions<AppOptions> appOptions) {
+            AppOptions appOptions) {
             _cacheClient = cacheClient;
             _messagePublisher = messagePublisher;
             _eventQueue = eventQueue;
@@ -53,8 +52,8 @@ namespace Exceptionless.Web.Controllers {
         [HttpGet("about")]
         public IActionResult IndexAsync() {
             return Ok(new {
-                _appOptions.Value.InformationalVersion,
-                AppMode = _appOptions.Value.AppMode.ToString(),
+                _appOptions.InformationalVersion,
+                AppMode = _appOptions.AppMode.ToString(),
                 Environment.MachineName
             });
         }
@@ -98,6 +97,7 @@ namespace Exceptionless.Web.Controllers {
         }
 
         [HttpPost("notifications/release")]
+        [Consumes("application/json")]
         [Authorize(Policy = AuthorizationRoles.GlobalAdminPolicy)]
         public async Task<ActionResult<ReleaseNotification>> PostReleaseNotificationAsync(ValueFromBody<string> message, bool critical = false) {
             var notification = new ReleaseNotification { Critical = critical, Date = SystemClock.UtcNow, Message = message?.Value };
@@ -118,6 +118,7 @@ namespace Exceptionless.Web.Controllers {
         }
 
         [HttpPost("notifications/system")]
+        [Consumes("application/json")]
         [Authorize(Policy = AuthorizationRoles.GlobalAdminPolicy)]
         public async Task<ActionResult<SystemNotification>> PostSystemNotificationAsync(ValueFromBody<string> message) {
             if (String.IsNullOrWhiteSpace(message?.Value))

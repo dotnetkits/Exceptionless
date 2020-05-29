@@ -1,8 +1,8 @@
-FROM mcr.microsoft.com/dotnet/core/sdk:2.2.401 AS build
-WORKDIR /app
+ARG UI_VERSION=ui-ci:2.8.1-alpha.0.17
+FROM exceptionless/${UI_VERSION} AS ui
 
-ARG VERSION_SUFFIX=0-dev
-ENV VERSION_SUFFIX=$VERSION_SUFFIX
+FROM mcr.microsoft.com/dotnet/core/sdk:3.1 AS build
+WORKDIR /app
 
 COPY ./*.sln ./NuGet.Config ./
 COPY ./build/*.props ./build/
@@ -19,7 +19,7 @@ RUN dotnet restore
 
 # Copy everything else and build app
 COPY . .
-RUN dotnet build --version-suffix $VERSION_SUFFIX -c Release
+RUN dotnet build -c Release
 
 # testrunner
 
@@ -32,14 +32,11 @@ ENTRYPOINT dotnet test --results-directory /app/artifacts --logger:trx
 FROM build AS job-publish
 WORKDIR /app/src/Exceptionless.Job
 
-ARG VERSION_SUFFIX=0-dev
-ENV VERSION_SUFFIX=$VERSION_SUFFIX
-
-RUN dotnet publish --version-suffix $VERSION_SUFFIX -c Release -o out
+RUN dotnet publish -c Release -o out
 
 # job
 
-FROM mcr.microsoft.com/dotnet/core/aspnet:2.2 AS job
+FROM mcr.microsoft.com/dotnet/core/aspnet:3.1 AS job
 WORKDIR /app
 COPY --from=job-publish /app/src/Exceptionless.Job/out ./
 ENTRYPOINT [ "dotnet", "Exceptionless.Job.dll" ]
@@ -49,14 +46,62 @@ ENTRYPOINT [ "dotnet", "Exceptionless.Job.dll" ]
 FROM build AS api-publish
 WORKDIR /app/src/Exceptionless.Web
 
-ARG VERSION_SUFFIX=0-dev
-ENV VERSION_SUFFIX=$VERSION_SUFFIX
-
-RUN dotnet publish --version-suffix $VERSION_SUFFIX -c Release -o out
+RUN dotnet publish -c Release -o out
 
 # api
 
-FROM mcr.microsoft.com/dotnet/core/aspnet:2.2 AS api
+FROM mcr.microsoft.com/dotnet/core/aspnet:3.1 AS api
 WORKDIR /app
 COPY --from=api-publish /app/src/Exceptionless.Web/out ./
 ENTRYPOINT [ "dotnet", "Exceptionless.Web.dll" ]
+
+# app
+
+FROM mcr.microsoft.com/dotnet/core/aspnet:3.1 AS app
+
+WORKDIR /app
+COPY --from=api-publish /app/src/Exceptionless.Web/out ./
+COPY --from=ui /app ./wwwroot
+COPY --from=ui /usr/local/bin/bootstrap /usr/local/bin/bootstrap
+COPY ./build/docker-entrypoint.sh ./
+COPY ./build/supervisord.conf /etc/
+
+ENV EX_ConnectionStrings__Storage=provider=folder;path=/app/storage \
+    EX_RunJobsInProcess=true \
+    ASPNETCORE_URLS=http://+:80;https://+:443 \
+    EX_Html5Mode=true
+
+EXPOSE 80 443
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD [ "dotnet", "Exceptionless.Web.dll" ]
+
+# everything
+
+FROM exceptionless/elasticsearch:7.7.0 AS exceptionless
+
+WORKDIR /app
+COPY --from=api-publish /app/src/Exceptionless.Web/out ./
+COPY --from=ui /app ./wwwroot
+COPY --from=ui /usr/local/bin/bootstrap /usr/local/bin/bootstrap
+COPY ./build/docker-entrypoint.sh ./
+COPY ./build/supervisord.conf /etc/
+
+# install dotnet and supervisor
+RUN rpm -Uvh https://packages.microsoft.com/config/centos/7/packages-microsoft-prod.rpm && \
+    yum -y install aspnetcore-runtime-3.1 && \
+    yum -y install epel-release && \
+    yum -y install supervisor
+
+ENV discovery.type=single-node \
+    xpack.security.enabled=false \
+    ASPNETCORE_URLS=http://+;https://+ \
+    DOTNET_RUNNING_IN_CONTAINER=true \
+    EX_ConnectionStrings__Storage=provider=folder;path=/app/storage \
+    EX_RunJobsInProcess=true \
+    EX_Html5Mode=true \
+    EX_SslDirectory=/app/storage
+
+EXPOSE 80 443 9200
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
