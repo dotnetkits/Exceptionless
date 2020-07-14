@@ -1,5 +1,3 @@
-elasticsearch:
-  connectionString: server=http://10.0.0.4:9200;field-limit=2000
 api:
   replicaCount: 5
   defaultDomain: api.exceptionless.io
@@ -7,8 +5,9 @@ api:
     - api.exceptionless.io
     - api.exceptionless.com
 app:
+  replicaCount: 2
   image:
-    tag: "2.8.1502-pre"
+    tag: "2.9.0"
   defaultDomain: be.exceptionless.io
   domains:
     - be.exceptionless.io
