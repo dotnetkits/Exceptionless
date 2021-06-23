@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,6 +16,7 @@ using Exceptionless.Core.Queues.Models;
 using Exceptionless.Core.Repositories;
 using Exceptionless.DateTimeExtensions;
 using Exceptionless.Core.Models.Data;
+using Exceptionless.Core.Repositories.Base;
 using Exceptionless.Core.Repositories.Configuration;
 using Exceptionless.Core.Repositories.Queries;
 using Exceptionless.Core.Services;
@@ -33,6 +34,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
 using Newtonsoft.Json;
+using System.Text;
 
 namespace Exceptionless.Web.Controllers {
     [Route(API_PREFIX + "/events")]
@@ -64,7 +66,8 @@ namespace Exceptionless.Web.Controllers {
             IMapper mapper,
             PersistentEventQueryValidator validator,
             AppOptions appOptions,
-            ILoggerFactory loggerFactory) : base(repository, mapper, validator, loggerFactory) {
+            ILoggerFactory loggerFactory
+        ) : base(repository, mapper, validator, loggerFactory) {
             _organizationRepository = organizationRepository;
             _projectRepository = projectRepository;
             _stackRepository = stackRepository;
@@ -87,17 +90,18 @@ namespace Exceptionless.Web.Controllers {
         /// <param name="aggregations">A list of values you want returned. Example: avg:value cardinality:value sum:users max:value min:value</param>
         /// <param name="time">The time filter that limits the data being returned to a specific date range.</param>
         /// <param name="offset">The time offset in minutes that controls what data is returned based on the time filter. This is used for time zone support.</param>
+        /// <param name="mode">If no mode is set then the whole event object will be returned. If the mode is set to summary than a light weight object will be returned.</param>
         /// <response code="400">Invalid filter.</response>
         [HttpGet("count")]
         [Authorize(Policy = AuthorizationRoles.UserPolicy)]
-        public async Task<ActionResult<CountResult>> GetCountAsync(string filter = null, string aggregations = null, string time = null, string offset = null) {
+        public async Task<ActionResult<CountResult>> GetCountAsync(string filter = null, string aggregations = null, string time = null, string offset = null, string mode = null) {
             var organizations = await GetSelectedOrganizationsAsync(_organizationRepository, _projectRepository, _stackRepository, filter);
-            if (organizations.Count(o => !o.IsSuspended) == 0)
+            if (organizations.All(o => o.IsSuspended))
                 return Ok(CountResult.Empty);
 
             var ti = GetTimeInfo(time, offset, organizations.GetRetentionUtcCutoff(_appOptions.MaximumRetentionDays));
             var sf = new AppFilter(organizations) { IsUserOrganizationsFilter = true };
-            return await GetCountImplAsync(sf, ti, filter, aggregations);
+            return await CountInternalAsync(sf, ti, filter, aggregations, mode);
         }
 
         /// <summary>
@@ -108,10 +112,11 @@ namespace Exceptionless.Web.Controllers {
         /// <param name="aggregations">A list of values you want returned. Example: avg:value cardinality:value sum:users max:value min:value</param>
         /// <param name="time">The time filter that limits the data being returned to a specific date range.</param>
         /// <param name="offset">The time offset in minutes that controls what data is returned based on the time filter. This is used for time zone support.</param>
+        /// <param name="mode">If no mode is set then the whole event object will be returned. If the mode is set to summary than a light weight object will be returned.</param>
         /// <response code="400">Invalid filter.</response>
         [HttpGet("~/" + API_PREFIX + "/organizations/{organizationId:objectid}/events/count")]
         [Authorize(Policy = AuthorizationRoles.UserPolicy)]
-        public async Task<ActionResult<CountResult>> GetCountByOrganizationAsync(string organizationId, string filter = null, string aggregations = null, string time = null, string offset = null) {
+        public async Task<ActionResult<CountResult>> GetCountByOrganizationAsync(string organizationId, string filter = null, string aggregations = null, string time = null, string offset = null, string mode = null) {
             var organization = await GetOrganizationAsync(organizationId);
             if (organization == null)
                 return NotFound();
@@ -121,7 +126,7 @@ namespace Exceptionless.Web.Controllers {
 
             var ti = GetTimeInfo(time, offset, organization.GetRetentionUtcCutoff(_appOptions.MaximumRetentionDays));
             var sf = new AppFilter(organization);
-            return await GetCountImplAsync(sf, ti, filter, aggregations);
+            return await CountInternalAsync(sf, ti, filter, aggregations, mode);
         }
 
         /// <summary>
@@ -132,10 +137,11 @@ namespace Exceptionless.Web.Controllers {
         /// <param name="aggregations">A list of values you want returned. Example: avg:value cardinality:value sum:users max:value min:value</param>
         /// <param name="time">The time filter that limits the data being returned to a specific date range.</param>
         /// <param name="offset">The time offset in minutes that controls what data is returned based on the time filter. This is used for time zone support.</param>
+        /// <param name="mode">If no mode is set then the whole event object will be returned. If the mode is set to summary than a light weight object will be returned.</param>
         /// <response code="400">Invalid filter.</response>
         [HttpGet("~/" + API_PREFIX + "/projects/{projectId:objectid}/events/count")]
         [Authorize(Policy = AuthorizationRoles.UserPolicy)]
-        public async Task<ActionResult<CountResult>> GetCountByProjectAsync(string projectId, string filter = null, string aggregations = null, string time = null, string offset = null) {
+        public async Task<ActionResult<CountResult>> GetCountByProjectAsync(string projectId, string filter = null, string aggregations = null, string time = null, string offset = null, string mode = null) {
             var project = await GetProjectAsync(projectId);
             if (project == null)
                 return NotFound();
@@ -149,21 +155,20 @@ namespace Exceptionless.Web.Controllers {
 
             var ti = GetTimeInfo(time, offset, organization.GetRetentionUtcCutoff(project, _appOptions.MaximumRetentionDays));
             var sf = new AppFilter(project, organization);
-            return await GetCountImplAsync(sf, ti, filter, aggregations);
+            return await CountInternalAsync(sf, ti, filter, aggregations, mode);
         }
 
         /// <summary>
         /// Get by id
         /// </summary>
         /// <param name="id">The identifier of the event.</param>
-        /// <param name="filter">A filter that controls what data is returned from the server.</param>
         /// <param name="time">The time filter that limits the data being returned to a specific date range.</param>
         /// <param name="offset">The time offset in minutes that controls what data is returned based on the time filter. This is used for time zone support.</param>
         /// <response code="404">The event occurrence could not be found.</response>
         /// <response code="426">Unable to view event occurrence due to plan limits.</response>
         [HttpGet("{id:objectid}", Name = "GetPersistentEventById")]
         [Authorize(Policy = AuthorizationRoles.UserPolicy)]
-        public async Task<ActionResult<PersistentEvent>> GetByIdAsync(string id, string filter = null, string time = null, string offset = null) {
+        public async Task<ActionResult<PersistentEvent>> GetAsync(string id, string time = null, string offset = null) {
             var model = await GetModelAsync(id, false);
             if (model == null)
                 return NotFound();
@@ -175,16 +180,9 @@ namespace Exceptionless.Web.Controllers {
             if (organization.IsSuspended || organization.RetentionDays > 0 && model.Date.UtcDateTime < SystemClock.UtcNow.SubtractDays(organization.RetentionDays))
                 return PlanLimitReached("Unable to view event occurrence due to plan limits.");
 
-            if (!String.IsNullOrEmpty(filter))
-                filter = filter.ReplaceFirst("stack:current", $"stack:{model.StackId}");
-
-            var pr = await _validator.ValidateQueryAsync(filter);
-            if (!pr.IsValid)
-                return OkWithLinks(model, GetEntityResourceLink<Stack>(model.StackId, "parent"));
-
             var ti = GetTimeInfo(time, offset, organization.GetRetentionUtcCutoff(_appOptions.MaximumRetentionDays));
             var sf = new AppFilter(organization);
-            var result = await _repository.GetPreviousAndNextEventIdsAsync(model, sf, filter, ti.Range.UtcStart, ti.Range.UtcEnd);
+            var result = await _repository.GetPreviousAndNextEventIdsAsync(model, sf, ti.Range.UtcStart, ti.Range.UtcEnd);
             return OkWithLinks(model, new [] { GetEntityResourceLink(result.Previous, "previous"), GetEntityResourceLink(result.Next, "next"), GetEntityResourceLink<Stack>(model.StackId, "parent") });
         }
 
@@ -204,12 +202,44 @@ namespace Exceptionless.Web.Controllers {
         [Authorize(Policy = AuthorizationRoles.UserPolicy)]
         public async Task<ActionResult<IReadOnlyCollection<PersistentEvent>>> GetAsync(string filter = null, string sort = null, string time = null, string offset = null, string mode = null, int page = 1, int limit = 10, string after = null) {
             var organizations = await GetSelectedOrganizationsAsync(_organizationRepository, _projectRepository, _stackRepository, filter);
-            if (organizations.Count(o => !o.IsSuspended) == 0)
+            if (organizations.All(o => o.IsSuspended))
                 return Ok(EmptyModels);
 
             var ti = GetTimeInfo(time, offset, organizations.GetRetentionUtcCutoff(_appOptions.MaximumRetentionDays));
             var sf = new AppFilter(organizations) { IsUserOrganizationsFilter = true };
             return await GetInternalAsync(sf, ti, filter, sort, mode, page, limit, after);
+        }
+
+        private async Task<ActionResult<CountResult>> CountInternalAsync(AppFilter sf, TimeInfo ti, string filter = null, string aggregations = null, string mode = null) {
+            var pr = await _validator.ValidateQueryAsync(filter);
+            if (!pr.IsValid)
+                return BadRequest(pr.Message);
+
+            var far = await _validator.ValidateAggregationsAsync(aggregations);
+            if (!far.IsValid)
+                return BadRequest(far.Message);
+
+            sf.UsesPremiumFeatures = pr.UsesPremiumFeatures || far.UsesPremiumFeatures;
+
+            if (mode == "stack_new")
+                filter = AddFirstOccurrenceFilter(ti.Range, filter);
+
+            var query = new RepositoryQuery<PersistentEvent>()
+                .AppFilter(ShouldApplySystemFilter(sf, filter) ? sf : null)
+                .DateRange(ti.Range.UtcStart, ti.Range.UtcEnd, ti.Field)
+                .Index(ti.Range.UtcStart, ti.Range.UtcEnd);
+
+            CountResult result;
+            try {
+                result = await _repository.CountAsync(q => q.SystemFilter(query).FilterExpression(filter).EnforceEventStackFilter().AggregationsExpression(aggregations));
+            } catch (Exception ex) {
+                using (_logger.BeginScope(new ExceptionlessState().Property("Search Filter", new { SystemFilter = sf, UserFilter = filter, Time = ti, Aggregations = aggregations }).Tag("Search").Identity(CurrentUser.EmailAddress).Property("User", CurrentUser).SetHttpContext(HttpContext)))
+                    _logger.LogError(ex, "An error has occurred. Please check your filter or aggregations.");
+
+                return BadRequest("An error has occurred. Please check your search filter.");
+            }
+
+            return Ok(result);
         }
 
         private async Task<ActionResult<IReadOnlyCollection<PersistentEvent>>> GetInternalAsync(AppFilter sf, TimeInfo ti, string filter = null, string sort = null, string mode = null, int page = 1, int limit = 10, string after = null, bool usesPremiumFeatures = false) {
@@ -226,28 +256,115 @@ namespace Exceptionless.Web.Controllers {
             sf.UsesPremiumFeatures = pr.UsesPremiumFeatures || usesPremiumFeatures;
             bool useSearchAfter = !String.IsNullOrEmpty(after);
 
-            FindResults<PersistentEvent> events;
             try {
-                events = await _repository.GetByFilterAsync(ShouldApplySystemFilter(sf, filter) ? sf : null, filter, sort, ti.Field, ti.Range.UtcStart, ti.Range.UtcEnd, o => useSearchAfter ? o.SearchAfterPaging().SearchAfter(after).PageLimit(limit) : o.PageNumber(page).PageLimit(limit));
-            } catch (ApplicationException ex) {
-                using (_logger.BeginScope(new ExceptionlessState().Property("Search Filter", new { SystemFilter = sf, UserFilter = filter, Time = ti, Page = page, Limit = limit }).Tag("Search").Identity(CurrentUser.EmailAddress).Property("User", CurrentUser).SetHttpContext(HttpContext)))
-                    _logger.LogError(ex, "An error has occurred. Please check your search filter.");
+                FindResults<PersistentEvent> events;
+                switch (mode) {
+                    case "summary":
+                        events = await GetEventsInternalAsync(sf, ti, filter, sort, page, limit, after, useSearchAfter);
+                        return OkWithResourceLinks(events.Documents.Select(e => {
+                            var summaryData = _formattingPluginManager.GetEventSummaryData(e);
+                            return new EventSummaryModel {
+                                TemplateKey = summaryData.TemplateKey,
+                                Id = e.Id,
+                                Date = e.Date,
+                                Data = summaryData.Data
+                            };
+                        }).ToList(), events.HasMore && !NextPageExceedsSkipLimit(page, limit), page, events.Total);
+                    case "stack_recent":
+                    case "stack_frequent":
+                    case "stack_new":
+                    case "stack_users":
+                        if (!String.IsNullOrEmpty(sort))
+                            return BadRequest("Sort is not supported in stack mode.");
 
-                return BadRequest("An error has occurred. Please check your search filter.");
+                        var systemFilter = new RepositoryQuery<PersistentEvent>()
+                            .AppFilter(ShouldApplySystemFilter(sf, filter) ? sf : null)
+                            .EnforceEventStackFilter()
+                            .DateRange(ti.Range.UtcStart, ti.Range.UtcEnd, (PersistentEvent e) => e.Date)
+                            .Index(ti.Range.UtcStart, ti.Range.UtcEnd);
+
+                        string stackAggregations = mode switch {
+                            "stack_recent" => "cardinality:user sum:count~1 min:date -max:date",
+                            "stack_frequent" => "cardinality:user -sum:count~1 min:date max:date",
+                            "stack_new" => "cardinality:user sum:count~1 -min:date max:date",
+                            "stack_users" => "-cardinality:user sum:count~1 min:date max:date",
+                            _ => null
+                        };
+
+                        if (mode == "stack_new")
+                            filter = AddFirstOccurrenceFilter(ti.Range, filter);
+
+                        var countResponse = await _repository.CountAsync(q => q
+                            .SystemFilter(systemFilter)
+                            .FilterExpression(filter)
+                            .EnforceEventStackFilter()
+                            .AggregationsExpression($"terms:(stack_id~{GetSkip(page + 1, limit) + 1} {stackAggregations})"));
+
+                        var stackTerms = countResponse.Aggregations.Terms<string>("terms_stack_id");
+                        if (stackTerms == null || stackTerms.Buckets.Count == 0)
+                            return Ok(EmptyModels);
+
+                        string[] stackIds = stackTerms.Buckets.Skip(skip).Take(limit + 1).Select(t => t.Key).ToArray();
+                        var stacks = (await _stackRepository.GetByIdsAsync(stackIds)).Select(s => s.ApplyOffset(ti.Offset)).ToList();
+
+                        var summaries = await GetStackSummariesAsync(stacks, stackTerms.Buckets, sf, ti);
+                        return OkWithResourceLinks(summaries.Take(limit).ToList(), summaries.Count > limit, page);
+                    default:
+                        events = await GetEventsInternalAsync(sf, ti, filter, sort, page, limit, after, useSearchAfter);
+                        return OkWithResourceLinks(events.Documents, events.HasMore && !NextPageExceedsSkipLimit(page, limit), page, events.Total);
+                }
+            } catch (ApplicationException ex) {
+                string message = "An error has occurred. Please check your search filter.";
+                if (ex is DocumentLimitExceededException)
+                    message = $"An error has occurred. {ex.Message ?? "Please limit your search criteria."}";
+
+                using (_logger.BeginScope(new ExceptionlessState().Property("Search Filter", new { SystemFilter = sf, UserFilter = filter, Time = ti, Page = page, Limit = limit }).Tag("Search").Identity(CurrentUser.EmailAddress).Property("User", CurrentUser).SetHttpContext(HttpContext)))
+                    _logger.LogError(ex, message);
+
+                return BadRequest(message);
+            }
+        }
+
+        private string AddFirstOccurrenceFilter(DateTimeRange timeRange, string filter) {
+            bool inverted = false;
+            if (filter != null && filter.StartsWith("@!")) {
+                inverted = true;
+                filter = filter.Substring(2);
             }
 
-            if (!String.IsNullOrEmpty(mode) && String.Equals(mode, "summary", StringComparison.OrdinalIgnoreCase))
-                return OkWithResourceLinks(events.Documents.Select(e => {
-                    var summaryData = _formattingPluginManager.GetEventSummaryData(e);
-                    return new EventSummaryModel {
-                        TemplateKey = summaryData.TemplateKey,
-                        Id = e.Id,
-                        Date = e.Date,
-                        Data = summaryData.Data
-                    };
-                }).ToList(), events.HasMore && !NextPageExceedsSkipLimit(page, limit), page, events.Total);
+            var sb = new StringBuilder();
+            if (inverted)
+                sb.Append("@!");
 
-            return OkWithResourceLinks(events.Documents, events.HasMore && !NextPageExceedsSkipLimit(page, limit), page, events.Total);
+            sb.Append("first_occurrence:[");
+            sb.Append((long)timeRange.UtcStart.Subtract(DateTime.UnixEpoch).TotalMilliseconds);
+            sb.Append(" TO ");
+            sb.Append((long)timeRange.UtcEnd.Subtract(DateTime.UnixEpoch).TotalMilliseconds);
+            sb.Append(']');
+
+            if (String.IsNullOrEmpty(filter))
+                return sb.ToString();
+
+            sb.Append(' ');
+
+            bool isGrouped = filter.StartsWith('(') && filter.EndsWith(')');
+
+            if (isGrouped)
+                sb.Append(filter);
+            else
+                sb.Append('(').Append(filter).Append(')');
+
+            return sb.ToString();
+        }
+
+        private Task<FindResults<PersistentEvent>> GetEventsInternalAsync(AppFilter sf, TimeInfo ti, string filter, string sort, int page, int limit, string after, bool useSearchAfter) {
+            if (String.IsNullOrEmpty(sort))
+                sort = "-date";
+
+            return _repository.FindAsync(q => q.AppFilter(ShouldApplySystemFilter(sf, filter) ? sf : null).FilterExpression(filter).EnforceEventStackFilter().SortExpression(sort).DateRange(ti.Range.UtcStart, ti.Range.UtcEnd, ti.Field),
+                o => useSearchAfter
+                    ? o.SearchAfterPaging().SearchAfter(after).PageLimit(limit)
+                    : o.PageNumber(page).PageLimit(limit));
         }
 
         /// <summary>
@@ -362,7 +479,7 @@ namespace Exceptionless.Web.Controllers {
         [Authorize(Policy = AuthorizationRoles.UserPolicy)]
         public async Task<ActionResult<IReadOnlyCollection<PersistentEvent>>> GetByReferenceIdAsync(string referenceId, string offset = null, string mode = null, int page = 1, int limit = 10, string after = null) {
             var organizations = await GetSelectedOrganizationsAsync(_organizationRepository, _projectRepository, _stackRepository);
-            if (organizations.Count(o => !o.IsSuspended) == 0)
+            if (organizations.All(o => o.IsSuspended))
                 return Ok(EmptyModels);
 
             var ti = GetTimeInfo(null, offset, organizations.GetRetentionUtcCutoff(_appOptions.MaximumRetentionDays));
@@ -419,7 +536,7 @@ namespace Exceptionless.Web.Controllers {
         [Authorize(Policy = AuthorizationRoles.UserPolicy)]
         public async Task<ActionResult<IReadOnlyCollection<PersistentEvent>>> GetBySessionIdAsync(string sessionId, string filter = null, string sort = null, string time = null, string offset = null, string mode = null, int page = 1, int limit = 10, string after = null) {
             var organizations = await GetSelectedOrganizationsAsync(_organizationRepository, _projectRepository, _stackRepository, filter);
-            if (organizations.Count(o => !o.IsSuspended) == 0)
+            if (organizations.All(o => o.IsSuspended))
                 return Ok(EmptyModels);
 
             var ti = GetTimeInfo(time, offset, organizations.GetRetentionUtcCutoff(_appOptions.MaximumRetentionDays));
@@ -478,7 +595,7 @@ namespace Exceptionless.Web.Controllers {
         [Authorize(Policy = AuthorizationRoles.UserPolicy)]
         public async Task<ActionResult<IReadOnlyCollection<PersistentEvent>>> GetSessionsAsync(string filter = null, string sort = null, string time = null, string offset = null, string mode = null, int page = 1, int limit = 10, string after = null) {
             var organizations = await GetSelectedOrganizationsAsync(_organizationRepository, _projectRepository, _stackRepository, filter);
-            if (organizations.Count(o => !o.IsSuspended) == 0)
+            if (organizations.All(o => o.IsSuspended))
                 return Ok(EmptyModels);
 
             var ti = GetTimeInfo(time, offset, organizations.GetRetentionUtcCutoff(_appOptions.MaximumRetentionDays));
@@ -658,83 +775,106 @@ namespace Exceptionless.Web.Controllers {
         [HttpGet("~/api/v1/projects/{projectId:objectid}/events/submit")]
         [HttpGet("~/api/v1/projects/{projectId:objectid}/events/submit/{type:minlength(1)}")]
         [ConfigurationResponseFilter]
-        public Task<IActionResult> GetSubmitEventV1Async(string projectId = null, string type = null, [UserAgent] string userAgent = null, [QueryStringParameters] IQueryCollection parameters = null) {
+        public Task<ActionResult> GetSubmitEventV1Async(string projectId = null, string type = null, [FromHeader][UserAgent] string userAgent = null, [FromQuery][QueryStringParameters] IQueryCollection parameters = null) {
             return GetSubmitEventAsync(projectId, 1, type, userAgent, parameters);
         }
 
         /// <summary>
-        /// Create
+        /// Submit event by GET
         /// </summary>
         /// <remarks>
-        /// You can create an event using query string parameters.
+        /// You can submit an event using an HTTP GET and query string parameters. Any unknown query string parameters will be added to the extended data of the event.
         ///
         /// Feature usage named build with a duration of 10:
         /// <code><![CDATA[/events/submit?access_token=YOUR_API_KEY&type=usage&source=build&value=10]]></code>
-        /// OR
-        /// <code><![CDATA[/events/submit/usage?access_token=YOUR_API_KEY&source=build&value=10]]></code>
         ///
         /// Log with message, geo and extended data
         /// <code><![CDATA[/events/submit?access_token=YOUR_API_KEY&type=log&message=Hello World&source=server01&geo=32.85,-96.9613&randomproperty=true]]></code>
-        /// OR
-        /// <code><![CDATA[/events/submit/log?access_token=YOUR_API_KEY&message=Hello World&source=server01&geo=32.85,-96.9613&randomproperty=true]]></code>
         /// </remarks>
+        /// <param name="type">The event type (ie. error, log message, feature usage).</param>
+        /// <param name="source">The event source (ie. machine name, log name, feature name).</param>
+        /// <param name="message">The event message.</param>
+        /// <param name="reference">An optional identifier to be used for referencing this event instance at a later time.</param>
+        /// <param name="date">The date that the event occurred on.</param>
+        /// <param name="count">The number of duplicated events.</param>
+        /// <param name="value">The value of the event if any.</param>
+        /// <param name="geo">The geo coordinates where the event happened.</param>
+        /// <param name="tags">A list of tags used to categorize this event (comma separated).</param>
+        /// <param name="identity">The user's identity that the event happened to.</param>
+        /// <param name="identityname">The user's friendly name that the event happened to.</param>
         /// <param name="userAgent">The user agent that submitted the event.</param>
-        /// <param name="parameters">Query String parameters that control what properties are set on the event</param>
+        /// <param name="parameters">Query string parameters that control what properties are set on the event</param>
         /// <response code="200">OK</response>
         /// <response code="400">No project id specified and no default project was found.</response>
         /// <response code="404">No project was found.</response>
         [HttpGet("submit")]
         [ConfigurationResponseFilter]
-        public Task<IActionResult> GetSubmitEventV2Async([UserAgent] string userAgent = null, [QueryStringParameters] IQueryCollection parameters = null) {
+        public Task<ActionResult> GetSubmitEventV2Async(string type = null, string source = null, string message = null, string reference = null,
+            string date = null, int? count = null, decimal? value = null, string geo = null, string tags = null, string identity = null,
+            string identityname = null, [FromHeader][UserAgent] string userAgent = null, [FromQuery][QueryStringParameters] IQueryCollection parameters = null) {
             return GetSubmitEventAsync(null, 2, null, userAgent, parameters);
         }
 
         /// <summary>
-        /// Create
+        /// Submit event type by GET
         /// </summary>
         /// <remarks>
-        /// You can create an event using query string parameters.
+        /// You can submit an event using an HTTP GET and query string parameters.
         ///
-        /// Feature usage named build with a duration of 10:
-        /// <code><![CDATA[/events/submit?access_token=YOUR_API_KEY&type=usage&source=build&value=10]]></code>
-        /// OR
+        /// Feature usage event named build with a value of 10:
         /// <code><![CDATA[/events/submit/usage?access_token=YOUR_API_KEY&source=build&value=10]]></code>
         ///
-        /// Log with message, geo and extended data
-        /// <code><![CDATA[/events/submit?access_token=YOUR_API_KEY&type=log&message=Hello World&source=server01&geo=32.85,-96.9613&randomproperty=true]]></code>
-        /// OR
+        /// Log event with message, geo and extended data
         /// <code><![CDATA[/events/submit/log?access_token=YOUR_API_KEY&message=Hello World&source=server01&geo=32.85,-96.9613&randomproperty=true]]></code>
         /// </remarks>
-        /// <param name="type">The event type</param>
+        /// <param name="type">The event type (ie. error, log message, feature usage).</param>
+        /// <param name="source">The event source (ie. machine name, log name, feature name).</param>
+        /// <param name="message">The event message.</param>
+        /// <param name="reference">An optional identifier to be used for referencing this event instance at a later time.</param>
+        /// <param name="date">The date that the event occurred on.</param>
+        /// <param name="count">The number of duplicated events.</param>
+        /// <param name="value">The value of the event if any.</param>
+        /// <param name="geo">The geo coordinates where the event happened.</param>
+        /// <param name="tags">A list of tags used to categorize this event (comma separated).</param>
+        /// <param name="identity">The user's identity that the event happened to.</param>
+        /// <param name="identityname">The user's friendly name that the event happened to.</param>
         /// <param name="userAgent">The user agent that submitted the event.</param>
-        /// <param name="parameters">Query String parameters that control what properties are set on the event</param>
+        /// <param name="parameters">Query string parameters that control what properties are set on the event</param>
         /// <response code="200">OK</response>
         /// <response code="400">No project id specified and no default project was found.</response>
         /// <response code="404">No project was found.</response>
         [HttpGet("submit/{type:minlength(1)}")]
         [ConfigurationResponseFilter]
-        public Task<IActionResult> GetSubmitEventV2Async(string type = null, [UserAgent] string userAgent = null, [QueryStringParameters] IQueryCollection parameters = null) {
+        public Task<ActionResult> GetSubmitEventByTypeV2Async(string type, string source = null, string message = null, string reference = null,
+            string date = null, int? count = null, decimal? value = null, string geo = null, string tags = null, string identity = null,
+            string identityname = null, [FromHeader][UserAgent] string userAgent = null, [FromQuery][QueryStringParameters] IQueryCollection parameters = null) {
             return GetSubmitEventAsync(null, 2, type, userAgent, parameters);
         }
 
         /// <summary>
-        /// Create
+        /// Submit event type by GET for a specific project
         /// </summary>
         /// <remarks>
-        /// You can create an event using query string parameters.
+        /// You can submit an event using an HTTP GET and query string parameters.
         ///
         /// Feature usage named build with a duration of 10:
-        /// <code><![CDATA[/events/submit?access_token=YOUR_API_KEY&type=usage&source=build&value=10]]></code>
-        /// OR
-        /// <code><![CDATA[/events/submit/usage?access_token=YOUR_API_KEY&source=build&value=10]]></code>
+        /// <code><![CDATA[/projects/{projectId}/events/submit?access_token=YOUR_API_KEY&type=usage&source=build&value=10]]></code>
         ///
         /// Log with message, geo and extended data
-        /// <code><![CDATA[/events/submit?access_token=YOUR_API_KEY&type=log&message=Hello World&source=server01&geo=32.85,-96.9613&randomproperty=true]]></code>
-        /// OR
-        /// <code><![CDATA[/events/submit/log?access_token=YOUR_API_KEY&message=Hello World&source=server01&geo=32.85,-96.9613&randomproperty=true]]></code>
+        /// <code><![CDATA[/projects/{projectId}/events/submit?access_token=YOUR_API_KEY&type=log&message=Hello World&source=server01&geo=32.85,-96.9613&randomproperty=true]]></code>
         /// </remarks>
         /// <param name="projectId">The identifier of the project.</param>
-        /// <param name="type">The event type</param>
+        /// <param name="type">The event type (ie. error, log message, feature usage).</param>
+        /// <param name="source">The event source (ie. machine name, log name, feature name).</param>
+        /// <param name="message">The event message.</param>
+        /// <param name="reference">An optional identifier to be used for referencing this event instance at a later time.</param>
+        /// <param name="date">The date that the event occurred on.</param>
+        /// <param name="count">The number of duplicated events.</param>
+        /// <param name="value">The value of the event if any.</param>
+        /// <param name="geo">The geo coordinates where the event happened.</param>
+        /// <param name="tags">A list of tags used to categorize this event (comma separated).</param>
+        /// <param name="identity">The user's identity that the event happened to.</param>
+        /// <param name="identityname">The user's friendly name that the event happened to.</param>
         /// <param name="userAgent">The user agent that submitted the event.</param>
         /// <param name="parameters">Query String parameters that control what properties are set on the event</param>
         /// <response code="200">OK</response>
@@ -743,11 +883,13 @@ namespace Exceptionless.Web.Controllers {
         [HttpGet("~/api/v2/projects/{projectId:objectid}/events/submit")]
         [HttpGet("~/api/v2/projects/{projectId:objectid}/events/submit/{type:minlength(1)}")]
         [ConfigurationResponseFilter]
-        public Task<IActionResult> GetSubmitEventByProjectV2Async(string projectId = null, string type = null, [UserAgent] string userAgent = null, [QueryStringParameters] IQueryCollection parameters = null) {
+        public Task<ActionResult> GetSubmitEventByProjectV2Async(string projectId, string type = null, string source = null, string message = null, string reference = null,
+            string date = null, int? count = null, decimal? value = null, string geo = null, string tags = null, string identity = null,
+            string identityname = null, [FromHeader][UserAgent] string userAgent = null, [FromQuery][QueryStringParameters] IQueryCollection parameters = null) {
             return GetSubmitEventAsync(projectId, 2, type, userAgent, parameters);
         }
 
-        private async Task<IActionResult> GetSubmitEventAsync(string projectId = null, int apiVersion = 2, string type = null, string userAgent = null, IQueryCollection parameters = null) {
+        private async Task<ActionResult> GetSubmitEventAsync(string projectId = null, int apiVersion = 2, string type = null, string userAgent = null, IQueryCollection parameters = null) {
             var filteredParameters = parameters?.Where(p => !String.IsNullOrEmpty(p.Key) && !p.Value.All(String.IsNullOrEmpty) && !_ignoredKeys.Contains(p.Key)).ToList();
             if (filteredParameters == null || filteredParameters.Count == 0)
                 return Ok();
@@ -761,8 +903,7 @@ namespace Exceptionless.Web.Controllers {
 
             var project = Request.GetProject();
             if (!String.Equals(project?.Id, projectId)) {
-                if (_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Project {RequestProjectId} from request doesn't match project route id {RouteProjectId}", project?.Id, projectId);
+                _logger.ProjectRouteDoesNotMatch(project?.Id, projectId);
 
                 project = await GetProjectAsync(projectId);
 
@@ -868,8 +1009,9 @@ namespace Exceptionless.Web.Controllers {
         [Obsolete]
         [HttpPost("~/api/v1/error")]
         [Consumes("application/json", "text/plain")]
+        [RequestBodyContentAttribute]
         [ConfigurationResponseFilter]
-        public Task<IActionResult> LegacyPostAsync([UserAgent] string userAgent = null) {
+        public Task<IActionResult> LegacyPostAsync([FromHeader][UserAgent] string userAgent = null) {
             return PostAsync(null, 1, userAgent);
         }
 
@@ -877,14 +1019,15 @@ namespace Exceptionless.Web.Controllers {
         [HttpPost("~/api/v1/events")]
         [HttpPost("~/api/v1/projects/{projectId:objectid}/events")]
         [Consumes("application/json", "text/plain")]
+        [RequestBodyContentAttribute]
         [ConfigurationResponseFilter]
         [ProducesResponseType(StatusCodes.Status202Accepted)]
-        public Task <IActionResult> PostV1Async(string projectId = null, [UserAgent]string userAgent = null) {
+        public Task <IActionResult> PostV1Async(string projectId = null, [FromHeader][UserAgent]string userAgent = null) {
             return PostAsync(projectId, 1, userAgent);
         }
 
         ///  <summary>
-        ///  Create
+        ///  Submit event by POST
         ///  </summary>
         ///  <remarks>
         ///  You can create an event by posting any uncompressed or compressed (gzip or deflate) string or json object. If we know how to handle it
@@ -903,7 +1046,7 @@ namespace Exceptionless.Web.Controllers {
         ///      {
         ///          "type": "log",
         ///          "message": "Exceptionless is amazing!",
-        ///          "date":"2020-01-01T12:00:00.0000000-05:00",
+        ///          "date":"2030-01-01T12:00:00.0000000-05:00",
         ///          "@user":{ "identity":"123456789", "name": "Test User" }
         ///      }
         ///  </code>
@@ -918,7 +1061,7 @@ namespace Exceptionless.Web.Controllers {
         ///  <code>
         ///      {
         ///          "type": "error",
-        ///          "date":"2020-01-01T12:00:00.0000000-05:00",
+        ///          "date":"2030-01-01T12:00:00.0000000-05:00",
         ///          "@simple_error": {
         ///              "message": "Simple Exception",
         ///              "type": "System.Exception",
@@ -933,14 +1076,15 @@ namespace Exceptionless.Web.Controllers {
         ///  <response code="404">No project was found.</response>
         [HttpPost]
         [Consumes("application/json", "text/plain")]
+        [RequestBodyContentAttribute]
         [ConfigurationResponseFilter]
         [ProducesResponseType(StatusCodes.Status202Accepted)]
-        public Task<IActionResult> PostV2Async([UserAgent]string userAgent = null) {
+        public Task<IActionResult> PostV2Async([FromHeader][UserAgent]string userAgent = null) {
             return PostAsync(null, 2, userAgent);
         }
 
         ///  <summary>
-        ///  Create
+        ///  Submit event by POST for a specific project
         ///  </summary>
         ///  <remarks>
         ///  You can create an event by posting any uncompressed or compressed (gzip or deflate) string or json object. If we know how to handle it
@@ -959,7 +1103,7 @@ namespace Exceptionless.Web.Controllers {
         ///      {
         ///          "type": "log",
         ///          "message": "Exceptionless is amazing!",
-        ///          "date":"2020-01-01T12:00:00.0000000-05:00",
+        ///          "date":"2030-01-01T12:00:00.0000000-05:00",
         ///          "@user":{ "identity":"123456789", "name": "Test User" }
         ///      }
         ///  </code>
@@ -974,7 +1118,7 @@ namespace Exceptionless.Web.Controllers {
         ///  <code>
         ///      {
         ///          "type": "error",
-        ///          "date":"2020-01-01T12:00:00.0000000-05:00",
+        ///          "date":"2030-01-01T12:00:00.0000000-05:00",
         ///          "@simple_error": {
         ///              "message": "Simple Exception",
         ///              "type": "System.Exception",
@@ -990,13 +1134,14 @@ namespace Exceptionless.Web.Controllers {
         ///  <response code="404">No project was found.</response>
         [HttpPost("~/api/v2/projects/{projectId:objectid}/events")]
         [Consumes("application/json", "text/plain")]
+        [RequestBodyContentAttribute]
         [ConfigurationResponseFilter]
         [ProducesResponseType(StatusCodes.Status202Accepted)]
-        public Task <IActionResult> PostByProjectV2Async(string projectId = null, [UserAgent]string userAgent = null) {
+        public Task <IActionResult> PostByProjectV2Async(string projectId = null, [FromHeader][UserAgent]string userAgent = null) {
             return PostAsync(projectId, 2, userAgent);
         }
 
-        private async Task <IActionResult> PostAsync(string projectId = null, int apiVersion = 2, [UserAgent]string userAgent = null) {
+        private async Task <IActionResult> PostAsync(string projectId = null, int apiVersion = 2, [FromHeader][UserAgent]string userAgent = null) {
             if (Request.ContentLength.HasValue && Request.ContentLength.Value <= 0)
                 return StatusCode(StatusCodes.Status202Accepted);
 
@@ -1009,8 +1154,7 @@ namespace Exceptionless.Web.Controllers {
 
             var project = Request.GetProject();
             if (!String.Equals(project?.Id, projectId)) {
-                if (_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Project {RequestProjectId} from request doesn't match project route id {RouteProjectId}", project?.Id, projectId);
+                _logger.ProjectRouteDoesNotMatch(project?.Id, projectId);
 
                 project = await GetProjectAsync(projectId);
 
@@ -1094,6 +1238,53 @@ namespace Exceptionless.Web.Controllers {
                 return null;
 
             return stack;
+        }
+
+        private async Task<ICollection<StackSummaryModel>> GetStackSummariesAsync(List<Stack> stacks, IReadOnlyCollection<KeyedBucket<string>> stackTerms, AppFilter sf, TimeInfo ti) {
+            if (stacks.Count == 0)
+                return new List<StackSummaryModel>(0);
+
+            var totalUsers = await GetUserCountByProjectIdsAsync(stacks, sf, ti.Range.UtcStart, ti.Range.UtcEnd);
+            return stacks.Join(stackTerms, s => s.Id, tk => tk.Key, (stack, term) => {
+                var data = _formattingPluginManager.GetStackSummaryData(stack);
+                var summary = new StackSummaryModel {
+                    TemplateKey = data.TemplateKey,
+                    Data = data.Data,
+                    Id = stack.Id,
+                    Title = stack.Title,
+                    Status = stack.Status,
+                    FirstOccurrence = term.Aggregations.Min<DateTime>("min_date").Value,
+                    LastOccurrence = term.Aggregations.Max<DateTime>("max_date").Value,
+                    Total = (long)(term.Aggregations.Sum("sum_count").Value ?? term.Total.GetValueOrDefault()),
+
+                    Users = term.Aggregations.Cardinality("cardinality_user").Value.GetValueOrDefault(),
+                    TotalUsers = totalUsers.GetOrDefault(stack.ProjectId)
+                };
+
+                return summary;
+            }).ToList();
+        }
+
+        private async Task<Dictionary<string, double>> GetUserCountByProjectIdsAsync(ICollection<Stack> stacks, AppFilter sf, DateTime utcStart, DateTime utcEnd) {
+            var scopedCacheClient = new ScopedCacheClient(_cache, $"Project:user-count:{utcStart.Floor(TimeSpan.FromMinutes(15)).Ticks}-{utcEnd.Floor(TimeSpan.FromMinutes(15)).Ticks}");
+            var projectIds = stacks.Select(s => s.ProjectId).Distinct().ToList();
+            var cachedTotals = await scopedCacheClient.GetAllAsync<double>(projectIds);
+
+            var totals = cachedTotals.Where(kvp => kvp.Value.HasValue).ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Value);
+            if (totals.Count == projectIds.Count)
+                return totals;
+
+            var systemFilter = new RepositoryQuery<PersistentEvent>().AppFilter(sf).DateRange(utcStart, utcEnd, (PersistentEvent e) => e.Date).Index(utcStart, utcEnd);
+            var projects = cachedTotals.Where(kvp => !kvp.Value.HasValue).Select(kvp => new Project { Id = kvp.Key, OrganizationId = stacks.FirstOrDefault(s => s.ProjectId == kvp.Key)?.OrganizationId }).ToList();
+            var countResult = await _repository.CountAsync(q => q.SystemFilter(systemFilter).FilterExpression(projects.BuildFilter()).EnforceEventStackFilter().AggregationsExpression("terms:(project_id cardinality:user)"));
+
+            // Cache all projects that have more than 10 users for 5 minutes.
+            var projectTerms = countResult.Aggregations.Terms<string>("terms_project_id").Buckets;
+            var aggregations = projectTerms.ToDictionary(t => t.Key, t => t.Aggregations.Cardinality("cardinality_user").Value.GetValueOrDefault());
+            await scopedCacheClient.SetAllAsync(aggregations.Where(t => t.Value >= 10).ToDictionary(k => k.Key, v => v.Value), TimeSpan.FromMinutes(5));
+            totals.AddRange(aggregations);
+
+            return totals;
         }
     }
 }

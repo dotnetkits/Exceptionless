@@ -25,7 +25,7 @@ namespace Exceptionless.Tests.Mail {
         private readonly BillingManager _billingManager;
         private readonly BillingPlans _plans;
 
-        public MailerTests(ServicesFixture fixture, ITestOutputHelper output) : base(fixture, output) {
+        public MailerTests(ITestOutputHelper output) : base(output) {
             _mailer = GetService<IMailer>();
             _options = GetService<AppOptions>();
             _billingManager = GetService<BillingManager>();
@@ -46,7 +46,7 @@ namespace Exceptionless.Tests.Mail {
             Assert.Equal("test@test.com", uri.User);
             Assert.Equal("testpass", uri.Password);
         }
-        
+
         [Fact]
         public Task SendEventNoticeSimpleErrorAsync() {
             var ex = GetException();
@@ -199,8 +199,10 @@ namespace Exceptionless.Tests.Mail {
 
             await RunMailJobAsync();
 
-            if (GetService<IMailSender>() is InMemoryMailSender sender)
-                Assert.Contains("Join Organization", sender.LastMessage.Body);
+            var sender = GetService<IMailSender>() as InMemoryMailSender;
+            Assert.NotNull(sender);
+
+            Assert.Contains("Join Organization", sender.LastMessage.Body);
         }
 
         [Fact]

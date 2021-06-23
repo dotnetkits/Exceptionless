@@ -1,51 +1,3 @@
-apiVersion: batch/v1beta1
-kind: CronJob
-metadata:
-  name: {{ template "exceptionless.fullname" . }}-jobs-cleanup-snapshot
-  labels:
-    app: {{ template "exceptionless.name" . }}
-    component: {{ template "exceptionless.fullname" . }}-jobs-cleanup-snapshot
-    tier: {{ template "exceptionless.fullname" . }}-job
-    chart: {{ template "exceptionless.chart" . }}
-    release: {{ .Release.Name }}
-    heritage: {{ .Release.Service }}
-spec:
-  schedule: "5 */1 * * *"
-  concurrencyPolicy: Forbid
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          containers:
-            - name: {{ template "exceptionless.name" . }}-jobs-cleanup-snapshot
-              image: "{{ .Values.jobs.image.repository }}:{{ .Values.jobs.image.tag }}"
-              imagePullPolicy: {{ .Values.jobs.image.pullPolicy }}
-              livenessProbe:
-                httpGet:
-                  path: /health
-                  port: 80
-                initialDelaySeconds: 10
-                periodSeconds: 10
-              readinessProbe:
-                httpGet:
-                  path: /ready
-                  port: 80
-                initialDelaySeconds: 2
-                periodSeconds: 1
-              resources:
-                requests:
-                  memory: 75Mi
-                  cpu: 200m
-                limits:
-                  memory: 125Mi
-                  cpu: 400m
-              args: [CleanupSnapshot]
-              envFrom:
-                - configMapRef:
-                    name: {{ template "exceptionless.fullname" . }}-config
-          restartPolicy: OnFailure
-
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -84,12 +36,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 100Mi
@@ -141,12 +87,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 250Mi
@@ -188,12 +128,6 @@ spec:
                   port: 80
                 initialDelaySeconds: 10
                 periodSeconds: 10
-              readinessProbe:
-                httpGet:
-                  path: /ready
-                  port: 80
-                initialDelaySeconds: 2
-                periodSeconds: 1
               resources:
                 requests:
                   memory: 100Mi
@@ -246,12 +180,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 100Mi
@@ -303,12 +231,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 250Mi
@@ -325,37 +247,25 @@ spec:
 apiVersion: batch/v1beta1
 kind: CronJob
 metadata:
-  name: {{ template "exceptionless.fullname" . }}-jobs-event-snapshot
+  name: {{ template "exceptionless.fullname" . }}-jobs-migration
   labels:
     app: {{ template "exceptionless.name" . }}
-    component: {{ template "exceptionless.fullname" . }}-jobs-event-snapshot
+    component: {{ template "exceptionless.fullname" . }}-jobs-migration
     tier: {{ template "exceptionless.fullname" . }}-job
     chart: {{ template "exceptionless.chart" . }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 spec:
-  schedule: "0 */12 * * *"
+  schedule: "0 0 29 2 1" # never, only manually
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
       template:
         spec:
           containers:
-            - name: {{ template "exceptionless.name" . }}-jobs-event-snapshot
+            - name: {{ template "exceptionless.name" . }}-jobs-migration
               image: "{{ .Values.jobs.image.repository }}:{{ .Values.jobs.image.tag }}"
               imagePullPolicy: {{ .Values.jobs.image.pullPolicy }}
-              livenessProbe:
-                httpGet:
-                  path: /health
-                  port: 80
-                initialDelaySeconds: 10
-                periodSeconds: 10
-              readinessProbe:
-                httpGet:
-                  path: /ready
-                  port: 80
-                initialDelaySeconds: 2
-                periodSeconds: 1
               resources:
                 requests:
                   memory: 75Mi
@@ -363,7 +273,7 @@ spec:
                 limits:
                   memory: 125Mi
                   cpu: 400m
-              args: [EventSnapshot]
+              args: [Migration]
               envFrom:
                 - configMapRef:
                     name: {{ template "exceptionless.fullname" . }}-config
@@ -408,12 +318,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 50Mi
@@ -465,12 +369,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 175Mi
@@ -512,12 +410,6 @@ spec:
                   port: 80
                 initialDelaySeconds: 10
                 periodSeconds: 10
-              readinessProbe:
-                httpGet:
-                  path: /ready
-                  port: 80
-                initialDelaySeconds: 2
-                periodSeconds: 1
               resources:
                 requests:
                   memory: 75Mi
@@ -535,23 +427,23 @@ spec:
 apiVersion: batch/v1beta1
 kind: CronJob
 metadata:
-  name: {{ template "exceptionless.fullname" . }}-jobs-organization-snapshot
+  name: {{ template "exceptionless.fullname" . }}-jobs-cleanup-data
   labels:
     app: {{ template "exceptionless.name" . }}
-    component: {{ template "exceptionless.fullname" . }}-jobs-organization-snapshot
+    component: {{ template "exceptionless.fullname" . }}-jobs-cleanup-data
     tier: {{ template "exceptionless.fullname" . }}-job
     chart: {{ template "exceptionless.chart" . }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 spec:
-  schedule: "30 * * * *"
+  schedule: "30 */4 * * *"
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
       template:
         spec:
           containers:
-            - name: {{ template "exceptionless.name" . }}-jobs-organization-snapshot
+            - name: {{ template "exceptionless.name" . }}-jobs-cleanup-data
               image: "{{ .Values.jobs.image.repository }}:{{ .Values.jobs.image.tag }}"
               imagePullPolicy: {{ .Values.jobs.image.pullPolicy }}
               livenessProbe:
@@ -560,81 +452,60 @@ spec:
                   port: 80
                 initialDelaySeconds: 10
                 periodSeconds: 10
-              readinessProbe:
-                httpGet:
-                  path: /ready
-                  port: 80
-                initialDelaySeconds: 2
-                periodSeconds: 1
               resources:
                 requests:
                   memory: 75Mi
-                  cpu: 200m
+                  cpu: 50m
                 limits:
-                  memory: 125Mi
+                  memory: 250Mi
                   cpu: 400m
-              args: [OrganizationSnapshot]
+              args: [CleanupData]
               envFrom:
                 - configMapRef:
                     name: {{ template "exceptionless.fullname" . }}-config
           restartPolicy: OnFailure
 
 ---
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1beta1
+kind: CronJob
 metadata:
-  name: {{ template "exceptionless.fullname" . }}-jobs-retention-limits
+  name: {{ template "exceptionless.fullname" . }}-jobs-cleanup-orphaned-data
   labels:
     app: {{ template "exceptionless.name" . }}
-    component: {{ template "exceptionless.fullname" . }}-jobs-retention-limits
+    component: {{ template "exceptionless.fullname" . }}-jobs-cleanup-orphaned-data
     tier: {{ template "exceptionless.fullname" . }}-job
     chart: {{ template "exceptionless.chart" . }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      component: {{ template "exceptionless.fullname" . }}-jobs-retention-limits
-  template:
-    metadata:
-      labels:
-        app: {{ template "exceptionless.name" . }}
-        component: {{ template "exceptionless.fullname" . }}-jobs-retention-limits
-        tier: {{ template "exceptionless.fullname" . }}-job
-        chart: {{ template "exceptionless.chart" . }}
-        release: {{ .Release.Name }}
-        heritage: {{ .Release.Service }}
-      annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+  schedule: "45 */8 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
     spec:
-      containers:
-        - name: {{ template "exceptionless.name" . }}-jobs-retention-limits
-          image: "{{ .Values.jobs.image.repository }}:{{ .Values.jobs.image.tag }}"
-          imagePullPolicy: {{ .Values.jobs.image.pullPolicy }}
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 80
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
-          resources:
-            requests:
-              memory: 75Mi
-              cpu: 50m
-            limits:
-              memory: 250Mi
-              cpu: 400m
-          args: [RetentionLimits]
-          envFrom:
-            - configMapRef:
-                name: {{ template "exceptionless.fullname" . }}-config
+      template:
+        spec:
+          containers:
+            - name: {{ template "exceptionless.name" . }}-jobs-cleanup-orphaned-data
+              image: "{{ .Values.jobs.image.repository }}:{{ .Values.jobs.image.tag }}"
+              imagePullPolicy: {{ .Values.jobs.image.pullPolicy }}
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: 80
+                initialDelaySeconds: 10
+                periodSeconds: 10
+              resources:
+                requests:
+                  memory: 75Mi
+                  cpu: 50m
+                limits:
+                  memory: 250Mi
+                  cpu: 400m
+              args: [CleanupOrphanedData]
+              envFrom:
+                - configMapRef:
+                    name: {{ template "exceptionless.fullname" . }}-config
+          restartPolicy: OnFailure
 
 ---
 apiVersion: apps/v1
@@ -675,12 +546,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 75Mi
@@ -692,54 +557,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ template "exceptionless.fullname" . }}-config
-
----
-apiVersion: batch/v1beta1
-kind: CronJob
-metadata:
-  name: {{ template "exceptionless.fullname" . }}-jobs-stack-snapshot
-  labels:
-    app: {{ template "exceptionless.name" . }}
-    component: {{ template "exceptionless.fullname" . }}-jobs-stack-snapshot
-    tier: {{ template "exceptionless.fullname" . }}-job
-    chart: {{ template "exceptionless.chart" . }}
-    release: {{ .Release.Name }}
-    heritage: {{ .Release.Service }}
-spec:
-  schedule: "40 * * * *"
-  concurrencyPolicy: Forbid
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          containers:
-            - name: {{ template "exceptionless.name" . }}-jobs-stack-snapshot
-              image: "{{ .Values.jobs.image.repository }}:{{ .Values.jobs.image.tag }}"
-              imagePullPolicy: {{ .Values.jobs.image.pullPolicy }}
-              livenessProbe:
-                httpGet:
-                  path: /health
-                  port: 80
-                initialDelaySeconds: 10
-                periodSeconds: 10
-              readinessProbe:
-                httpGet:
-                  path: /ready
-                  port: 80
-                initialDelaySeconds: 2
-                periodSeconds: 1
-              resources:
-                requests:
-                  memory: 75Mi
-                  cpu: 200m
-                limits:
-                  memory: 125Mi
-                  cpu: 400m
-              args: [StackSnapshot]
-              envFrom:
-                - configMapRef:
-                    name: {{ template "exceptionless.fullname" . }}-config
-          restartPolicy: OnFailure
 
 ---
 apiVersion: apps/v1
@@ -780,12 +597,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 175Mi
@@ -837,12 +648,6 @@ spec:
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 80
-            initialDelaySeconds: 2
-            periodSeconds: 1
           resources:
             requests:
               memory: 650Mi

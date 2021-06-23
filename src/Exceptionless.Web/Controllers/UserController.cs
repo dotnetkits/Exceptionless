@@ -60,7 +60,7 @@ namespace Exceptionless.Web.Controllers {
         /// <param name="id">The identifier of the user.</param>
         /// <response code="404">The user could not be found.</response>
         [HttpGet("{id:objectid}", Name = "GetUserById")]
-        public Task<ActionResult<ViewUser>> GetByIdAsync(string id) {
+        public Task<ActionResult<ViewUser>> GetAsync(string id) {
             return GetByIdImplAsync(id);
         }
 
@@ -309,7 +309,7 @@ namespace Exceptionless.Web.Controllers {
         protected override async Task<IEnumerable<string>> DeleteModelsAsync(ICollection<User> values) {
             foreach (var user in values) {
                 long removed = await _tokenRepository.RemoveAllByUserIdAsync(user.Id);
-                _logger.LogInformation("Removed {RemovedCount} tokens for user: {UserId}", removed, user.Id);
+                _logger.RemovedTokens(removed, user.Id);
             }
 
             return await base.DeleteModelsAsync(values);

@@ -10,10 +10,14 @@
     "cSpell.words": [
         "Exceptionless",
         "Guid",
+        "LDAP",
+        "Serilog",
+        "Xunit",
         "circleci",
         "dockerignore",
         "editorconfig",
         "elasticsearch",
         "gitignore"
-    ]
+    ],
+    "powershell.codeFormatting.addWhitespaceAroundPipe": true
 }

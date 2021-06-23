@@ -1,0 +1,47 @@
+@apiUrl = http://elastic:{{elasticPassword}}@elastic-ex-dev.localtest.me:9250/
+
+GET {{apiUrl}}_cat/indices/dev-*?v
+
+###
+
+DELETE {{apiUrl}}dev-*
+
+###
+
+GET {{apiUrl}}_cat/snapshots/prod-hourly
+
+###
+
+POST {{apiUrl}}dev-*/_close
+
+###
+
+GET {{apiUrl}}_snapshot/prod-hourly/hourly-2020.09.05-10-sknpvrrjr0-0ahbpgopbfw
+
+###
+
+POST {{apiUrl}}_snapshot/prod-hourly/hourly-2020.09.05-10-sknpvrrjr0-0ahbpgopbfw/_restore?wait_for_completion=false
+Content-Type: application/json
+
+{
+  "include_global_state": true,
+  "indices": "prod-*,-prod-events-*,prod-events-v1-2020.09.*,prod-events-v1-2020.08.2*,prod-events-v1-2020.08.3*",
+  "rename_pattern": "prod-(.+)",
+  "rename_replacement": "dev-$1"
+}
+
+###
+
+PUT {{apiUrl}}dev-*/_settings
+Content-Type: application/json
+
+{
+    "index" : {
+        "number_of_replicas" : 0
+    }
+}
+
+###
+
+GET {{apiUrl}}_tasks/hCqJFzl1QZWFkO5o1pWSSQ:128803
+

@@ -11,13 +11,12 @@ using Exceptionless.Web.Utility.Handlers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Joonasw.AspNetCore.SecurityHeaders;
 using System.Collections.Generic;
 using Exceptionless.Web.Extensions;
-using Foundatio.Hosting.Startup;
+using Foundatio.Extensions.Hosting.Startup;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.OpenApi.Models;
@@ -47,6 +46,8 @@ namespace Exceptionless.Web {
             services.Configure<ForwardedHeadersOptions>(options => {
                 options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
                 options.RequireHeaderSymmetry = false;
+                options.KnownNetworks.Clear();
+                options.KnownProxies.Clear();
             });
 
             services.AddControllers(o => {
@@ -99,32 +100,34 @@ namespace Exceptionless.Web {
                     In = ParameterLocation.Query,
                     Type = SecuritySchemeType.ApiKey
                 });
-                
+
                 c.AddSecurityRequirement(new OpenApiSecurityRequirement {
                     {
                         new OpenApiSecurityScheme {
                             Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Basic" }
                         },
-                        new string[0]
+                        Array.Empty<string>()
                     },
                     {
                         new OpenApiSecurityScheme {
                             Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
                         },
-                        new string[0]
+                        Array.Empty<string>()
                     },
                     {
                         new OpenApiSecurityScheme {
                             Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Token" }
                         },
-                        new string[0]
+                        Array.Empty<string>()
                     }
                 });
-                
-                if (File.Exists($@"{AppDomain.CurrentDomain.BaseDirectory}\Exceptionless.Web.xml"))
-                    c.IncludeXmlComments($@"{AppDomain.CurrentDomain.BaseDirectory}\Exceptionless.Web.xml");
-                
+
+                string xmlDocPath = Path.Combine(AppContext.BaseDirectory, "Exceptionless.Web.xml");
+                if (File.Exists(xmlDocPath))
+                    c.IncludeXmlComments(xmlDocPath);
+
                 c.IgnoreObsoleteActions();
+                c.OperationFilter<RequestBodyOperationFilter>();
             });
 
             var appOptions = AppOptions.ReadFromConfiguration(Configuration);
@@ -142,20 +145,20 @@ namespace Exceptionless.Web {
             Core.Bootstrapper.LogConfiguration(app.ApplicationServices, options, Log.Logger.ToLoggerFactory().CreateLogger<Startup>());
 
             app.UseMiddleware<AllowSynchronousIOMiddleware>();
-            
-            if (!String.IsNullOrEmpty(options.ExceptionlessApiKey) && !String.IsNullOrEmpty(options.ExceptionlessServerUrl))
-                app.UseExceptionless(ExceptionlessClient.Default);
 
             app.UseHealthChecks("/health", new HealthCheckOptions {
-                Predicate = hcr => options.RunJobsInProcess && hcr.Tags.Contains("AllJobs")
+                Predicate = hcr => hcr.Tags.Contains("Critical") || (options.RunJobsInProcess && hcr.Tags.Contains("AllJobs"))
             });
-            
+
             var readyTags = new List<string> { "Critical" };
             if (!options.EventSubmissionDisabled)
                 readyTags.Add("Storage");
             app.UseReadyHealthChecks(readyTags.ToArray());
             app.UseWaitForStartupActionsBeforeServingRequests();
-            
+
+            if (!String.IsNullOrEmpty(options.ExceptionlessApiKey) && !String.IsNullOrEmpty(options.ExceptionlessServerUrl))
+                app.UseExceptionless(ExceptionlessClient.Default);
+
             app.UseCsp(csp => {
                 csp.ByDefaultAllow.FromSelf()
                     .From("https://js.stripe.com")
@@ -163,8 +166,8 @@ namespace Exceptionless.Web {
                 csp.AllowFonts.FromSelf()
                     .From("https://fonts.gstatic.com")
                     .From("http://fonts.gstatic.com")
-                    .From("https://maxcdn.bootstrapcdn.com")
-                    .From("http://maxcdn.bootstrapcdn.com");
+                    .From("https://cdn.jsdelivr.net")
+                    .From("http://cdn.jsdelivr.net");
                 csp.AllowImages.FromSelf()
                     .From("data:")
                     .From("https://q.stripe.com")
@@ -174,24 +177,22 @@ namespace Exceptionless.Web {
                 csp.AllowScripts.FromSelf()
                     .AllowUnsafeInline()
                     .AllowUnsafeEval()
-                    .From("https://cdnjs.cloudflare.com")
-                    .From("http://cdnjs.cloudflare.com")
                     .From("https://js.stripe.com")
                     .From("http://js.stripe.com")
-                    .From("https://maxcdn.bootstrapcdn.com")
-                    .From("http://maxcdn.bootstrapcdn.com");
+                    .From("https://cdn.jsdelivr.net")
+                    .From("http://cdn.jsdelivr.net");
                 csp.AllowStyles.FromSelf()
                     .AllowUnsafeInline()
                     .From("https://fonts.googleapis.com")
                     .From("http://fonts.googleapis.com")
-                    .From("https://maxcdn.bootstrapcdn.com")
-                    .From("http://maxcdn.bootstrapcdn.com");
+                    .From("https://cdn.jsdelivr.net")
+                    .From("http://cdn.jsdelivr.net");
             });
 
             app.Use(async (context, next) => {
                 if (options.AppMode != AppMode.Development && context.Request.IsLocal() == false)
                     context.Response.Headers.Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-                
+
                 context.Response.Headers.Add("Referrer-Policy", "strict-origin-when-cross-origin");
                 context.Response.Headers.Add("X-Content-Type-Options", "nosniff");
                 context.Response.Headers.Add("X-Frame-Options", "DENY");
@@ -200,18 +201,18 @@ namespace Exceptionless.Web {
 
                 await next();
             });
-            
+
             var serverAddressesFeature = app.ServerFeatures.Get<IServerAddressesFeature>();
-            if (serverAddressesFeature != null && serverAddressesFeature.Addresses.Any(a => a.StartsWith("https://")))
+            if (options.AppMode != AppMode.Development && serverAddressesFeature != null && serverAddressesFeature.Addresses.Any(a => a.StartsWith("https://")))
                 app.UseHttpsRedirection();
-            
+
             app.UseSerilogRequestLogging(o => o.GetLevel = (context, duration, ex) => {
                 if (ex != null || context.Response.StatusCode > 499)
                     return LogEventLevel.Error;
-                
+
                 if (context.Response.StatusCode > 399)
                     return LogEventLevel.Information;
-                
+
                 if (duration < 1000 || context.Request.Path.StartsWithSegments("/api/v2/push"))
                     return LogEventLevel.Debug;
 
@@ -231,10 +232,10 @@ namespace Exceptionless.Web {
             app.UseCors("AllowAny");
             app.UseHttpMethodOverride();
             app.UseForwardedHeaders();
-            
+
             app.UseAuthentication();
             app.UseAuthorization();
-            
+
             app.UseMiddleware<ProjectConfigMiddleware>();
             app.UseMiddleware<RecordSessionHeartbeatMiddleware>();
 
@@ -248,6 +249,8 @@ namespace Exceptionless.Web {
 
             app.UseSwagger(c => {
                 c.RouteTemplate = "docs/{documentName}/swagger.json";
+                // TODO: Remove once 5.6.4+ is released 
+                c.PreSerializeFilters.Add((doc, _) => doc.Servers?.Clear());
             });
             app.UseSwaggerUI(s => {
                 s.RoutePrefix = "docs";
@@ -259,7 +262,7 @@ namespace Exceptionless.Web {
                 app.UseWebSockets();
                 app.UseMiddleware<MessageBusBrokerMiddleware>();
             }
-            
+
             app.UseEndpoints(endpoints => {
                 endpoints.MapControllers();
                 endpoints.MapFallbackToFile("{**slug:nonfile}", "index.html");

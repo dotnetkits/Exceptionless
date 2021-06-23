@@ -12,8 +12,8 @@ using Exceptionless.Core.Extensions;
 using Exceptionless.Core.Jobs;
 using Exceptionless.Core.Jobs.Elastic;
 using Exceptionless.Insulation.Configuration;
-using Foundatio.Hosting.Jobs;
-using Foundatio.Hosting.Startup;
+using Foundatio.Extensions.Hosting.Jobs;
+using Foundatio.Extensions.Hosting.Startup;
 using Foundatio.Jobs;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -67,14 +67,12 @@ namespace Exceptionless.Job {
  
             var loggerConfig = new LoggerConfiguration().ReadFrom.Configuration(config);
             if (!String.IsNullOrEmpty(options.ExceptionlessApiKey))
-                loggerConfig.WriteTo.Sink(new ExceptionlessSink(), LogEventLevel.Verbose);
+                loggerConfig.WriteTo.Sink(new ExceptionlessSink(), LogEventLevel.Information);
 
             Log.Logger = loggerConfig.CreateLogger();
             var configDictionary = config.ToDictionary("Serilog");
             Log.Information("Bootstrapping Exceptionless {JobName} job(s) in {AppMode} mode ({InformationalVersion}) on {MachineName} with settings {@Settings}", jobOptions.JobName ?? "All", environment, options.InformationalVersion, Environment.MachineName, configDictionary);
-
-            bool useApplicationInsights = !String.IsNullOrEmpty(options.ApplicationInsightsKey);
-
+            
             var builder = Host.CreateDefaultBuilder()
                 .UseEnvironment(environment)
                 .UseSerilog()
@@ -111,9 +109,6 @@ namespace Exceptionless.Job {
                     AddJobs(services, jobOptions);
                     services.AddAppOptions(options);
                     
-                    if (useApplicationInsights)
-                        services.AddApplicationInsightsTelemetry(options.ApplicationInsightsKey);
-                    
                     Bootstrapper.RegisterServices(services);
                     Insulation.Bootstrapper.RegisterServices(services, options, true);
                 });
@@ -127,38 +122,34 @@ namespace Exceptionless.Job {
         private static void AddJobs(IServiceCollection services, JobRunnerOptions options) {
             services.AddJobLifetimeService();
             
-            if (options.CleanupSnapshot)
-                services.AddJob<CleanupSnapshotJob>(true);
+            if (options.CleanupData)
+                services.AddJob<CleanupDataJob>();
+            if (options.CleanupOrphanedData)
+                services.AddJob<CleanupOrphanedDataJob>();
             if (options.CloseInactiveSessions)
                 services.AddJob<CloseInactiveSessionsJob>(true);
             if (options.DailySummary)
                 services.AddJob<DailySummaryJob>(true);
             if (options.DataMigration)
                 services.AddJob<DataMigrationJob>(true);
-            if (options.DownloadGeoipDatabase)
+            if (options.DownloadGeoIPDatabase)
                 services.AddJob<DownloadGeoIPDatabaseJob>(true);
             if (options.EventNotifications)
                 services.AddJob<EventNotificationsJob>(true);
             if (options.EventPosts)
                 services.AddJob<EventPostsJob>(true);
-            if (options.EventSnapshot)
-                services.AddJob<EventSnapshotJob>(true);
             if (options.EventUserDescriptions)
                 services.AddJob<EventUserDescriptionsJob>(true);
             if (options.MailMessage)
                 services.AddJob<MailMessageJob>(true);
             if (options.MaintainIndexes)
-                services.AddCronJob<MaintainIndexesJob>("10 */2 * * *");
+                services.AddJob<MaintainIndexesJob>();
             if (options.Migration)
                 services.AddJob<MigrationJob>(true);
-            if (options.OrganizationSnapshot)
-                services.AddJob<OrganizationSnapshotJob>(true);
-            if (options.RetentionLimits)
-                services.AddJob<RetentionLimitsJob>(true);
+            if (options.StackStatus)
+                services.AddJob<StackStatusJob>(true);
             if (options.StackEventCount)
                 services.AddJob<StackEventCountJob>(true);
-            if (options.StackSnapshot)
-                services.AddJob<StackSnapshotJob>(true);
             if (options.WebHooks)
                 services.AddJob<WebHooksJob>(true);
             if (options.WorkItem)

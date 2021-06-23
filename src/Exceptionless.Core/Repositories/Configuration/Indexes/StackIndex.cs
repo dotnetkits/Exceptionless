@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Exceptionless.Core.Models;
 using Exceptionless.Core.Repositories.Queries;
 using Foundatio.Parsers.ElasticQueries;
@@ -35,8 +36,11 @@ namespace Exceptionless.Core.Repositories.Configuration {
                         .FieldAlias(a => a.Name(Alias.OrganizationId).Path(f => f.OrganizationId))
                     .Keyword(f => f.Name(s => s.ProjectId).IgnoreAbove(1024))
                         .FieldAlias(a => a.Name(Alias.ProjectId).Path(f => f.ProjectId))
+                    .Keyword(f => f.Name(s => s.Status))
+                    .Date(f => f.Name(s => s.SnoozeUntilUtc))
                     .Keyword(f => f.Name(s => s.SignatureHash).IgnoreAbove(1024))
                         .FieldAlias(a => a.Name(Alias.SignatureHash).Path(f => f.SignatureHash))
+                    .Keyword(f => f.Name(s => s.DuplicateSignature))
                     .Keyword(f => f.Name(e => e.Type).IgnoreAbove(1024))
                     .Date(f => f.Name(s => s.FirstOccurrence))
                         .FieldAlias(a => a.Name(Alias.FirstOccurrence).Path(f => f.FirstOccurrence))
@@ -53,10 +57,6 @@ namespace Exceptionless.Core.Repositories.Configuration {
                     .Boolean(f => f.Name(Alias.IsFixed))
                     .Keyword(f => f.Name(s => s.FixedInVersion).IgnoreAbove(1024))
                         .FieldAlias(a => a.Name(Alias.FixedInVersion).Path(f => f.FixedInVersion))
-                    .Boolean(f => f.Name(s => s.IsHidden))
-                        .FieldAlias(a => a.Name(Alias.IsHidden).Path(f => f.IsHidden))
-                    .Boolean(f => f.Name(s => s.IsRegressed))
-                        .FieldAlias(a => a.Name(Alias.IsRegressed).Path(f => f.IsRegressed))
                     .Boolean(f => f.Name(s => s.OccurrencesAreCritical))
                         .FieldAlias(a => a.Name(Alias.OccurrencesAreCritical).Path(f => f.OccurrencesAreCritical))
                     .Scalar(f => f.TotalOccurrences)
@@ -68,7 +68,10 @@ namespace Exceptionless.Core.Repositories.Configuration {
             string dateFixedFieldName = InferPropertyName(f => f.DateFixed);
             config
                 .SetDefaultFields(new[] { "id", Alias.Title, Alias.Description, Alias.Tags, Alias.References })
-                .AddVisitor(new StackDateFixedQueryVisitor(dateFixedFieldName));
+                .AddVisitor(new StackDateFixedQueryVisitor(dateFixedFieldName))
+                .UseFieldMap(new Dictionary<string, string> {
+                    { Alias.Stack, "id" }
+                });
         }
         
         private AnalysisDescriptor BuildAnalysis(AnalysisDescriptor ad) {
@@ -81,6 +84,8 @@ namespace Exceptionless.Core.Repositories.Configuration {
         }
 
         public class Alias {
+            public const string Stack = "stack";
+            public const string Status = "status";
             public const string OrganizationId = "organization";
             public const string ProjectId = "project";
             public const string SignatureHash = "signature";

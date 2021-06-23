@@ -12,7 +12,7 @@ using Xunit.Abstractions;
 
 namespace Exceptionless.Tests {
     public class SerializerTests : TestWithServices {
-        public SerializerTests(ServicesFixture fixture, ITestOutputHelper output) : base(fixture, output) { }
+        public SerializerTests(ITestOutputHelper output) : base(output) { }
 
         [Fact]
         public void CanDeserializeEventWithUnknownNamesAndProperties() {
@@ -56,7 +56,7 @@ namespace Exceptionless.Tests {
         public void CanDeserializeEventWithInvalidKnownDataTypes() {
             const string json = @"{""Message"":""Hello"",""Some"":""{\""Blah\"":\""SomeVal\""}"",""@Some"":""{\""Blah\"":\""SomeVal\""}""}";
             const string jsonWithInvalidDataType = @"{""Message"":""Hello"",""@Some"":""Testing"",""@string"":""Testing""}";
-            
+
             var settings = new JsonSerializerSettings();
             var knownDataTypes = new Dictionary<string, Type> {
                 { "Some", typeof(SomeModel) },
@@ -92,7 +92,7 @@ namespace Exceptionless.Tests {
             Assert.Equal("Hello", ev.Message);
             Assert.Equal("SomeVal", ev.Data["Blah"]);
         }
-        
+
         [Fact]
         public void CanDeserializeWebHook() {
             var hook = new WebHook {
@@ -109,6 +109,18 @@ namespace Exceptionless.Tests {
             Assert.Equal(hook.Id, model.Id);
             Assert.Equal(hook.EventTypes, model.EventTypes);
             Assert.Equal(hook.Version, model.Version);
+        }
+
+        [Fact]
+        public void CanDeserializeProject() {
+            string json = "{\"last_event_date_utc\":\"2020-10-18T20:54:04.3457274+01:00\", \"created_utc\":\"0001-01-01T00:00:00\",\"updated_utc\":\"2020-09-21T04:41:32.7458321Z\"}";
+            
+            var serializer = GetService<ITextSerializer>();
+            var model = serializer.Deserialize<Project>(json);
+            Assert.NotNull(model?.LastEventDateUtc);
+            Assert.NotEqual(DateTime.MinValue, model.LastEventDateUtc);
+            Assert.Equal(DateTime.MinValue, model.CreatedUtc);
+            Assert.NotEqual(DateTime.MinValue, model.UpdatedUtc);
         }
     }
 

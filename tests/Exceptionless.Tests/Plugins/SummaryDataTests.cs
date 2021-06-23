@@ -9,7 +9,7 @@ using Xunit.Abstractions;
 
 namespace Exceptionless.Tests.Plugins {
     public class SummaryDataTests : TestWithServices {
-        public SummaryDataTests(ServicesFixture fixture, ITestOutputHelper output) : base(fixture, output) {}
+        public SummaryDataTests(ITestOutputHelper output) : base(output) {}
 
         [Theory]
         [MemberData(nameof(Events))]
@@ -50,7 +50,8 @@ namespace Exceptionless.Tests.Plugins {
                 Data = data.Data,
                 Id = stack.Id,
                 Title = stack.Title,
-                Total = 1,
+                Status = stack.Status,
+                Total = 1
             };
 
             string expectedContent = File.ReadAllText(Path.ChangeExtension(path, "summary.json"));

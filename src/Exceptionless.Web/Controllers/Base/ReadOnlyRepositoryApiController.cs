@@ -39,34 +39,6 @@ namespace Exceptionless.Web.Controllers {
             return await OkModelAsync(model);
         }
 
-        protected async Task<ActionResult<CountResult>> GetCountImplAsync(AppFilter sf, TimeInfo ti, string filter = null, string aggregations = null) {
-            var pr = await _validator.ValidateQueryAsync(filter);
-            if (!pr.IsValid)
-                return BadRequest(pr.Message);
-
-            var far = await _validator.ValidateAggregationsAsync(aggregations);
-            if (!far.IsValid)
-                return BadRequest(far.Message);
-
-            sf.UsesPremiumFeatures = pr.UsesPremiumFeatures || far.UsesPremiumFeatures;
-            var query = new RepositoryQuery<TModel>()
-                .AppFilter(ShouldApplySystemFilter(sf, filter) ? sf : null)
-                .DateRange(ti.Range.UtcStart, ti.Range.UtcEnd, ti.Field)
-                .Index(ti.Range.UtcStart, ti.Range.UtcEnd);
-
-            CountResult result;
-            try {
-                result = await _repository.CountBySearchAsync(query, filter, aggregations);
-            } catch (Exception ex) {
-                using (_logger.BeginScope(new ExceptionlessState().Property("Search Filter", new { SystemFilter = sf, UserFilter = filter, Time = ti, Aggregations = aggregations }).Tag("Search").Identity(CurrentUser.EmailAddress).Property("User", CurrentUser).SetHttpContext(HttpContext)))
-                    _logger.LogError(ex, "An error has occurred. Please check your filter or aggregations.");
-
-                return BadRequest("An error has occurred. Please check your search filter.");
-            }
-
-            return Ok(result);
-        }
-
         protected async Task<ActionResult<TViewModel>> OkModelAsync(TModel model) {
             return Ok(await MapAsync<TViewModel>(model, true));
         }
@@ -77,9 +49,6 @@ namespace Exceptionless.Web.Controllers {
 
             var model = await _repository.GetByIdAsync(id, o => o.Cache(useCache));
             if (model == null)
-                return null;
-
-            if (_supportsSoftDeletes && ((ISupportSoftDeletes)model).IsDeleted)
                 return null;
 
             if (_isOwnedByOrganization && !CanAccessOrganization(((IOwnedByOrganization)model).OrganizationId))
@@ -93,8 +62,6 @@ namespace Exceptionless.Web.Controllers {
                 return EmptyModels;
 
             var models = await _repository.GetByIdsAsync(ids, o => o.Cache(useCache));
-            if (_supportsSoftDeletes)
-                models = models.Where(m => !((ISupportSoftDeletes)m).IsDeleted).ToList();
 
             if (_isOwnedByOrganization)
                 models = models.Where(m => CanAccessOrganization(((IOwnedByOrganization)m).OrganizationId)).ToList();

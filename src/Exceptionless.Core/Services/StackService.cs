@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Exceptionless.Core.Extensions;
@@ -42,7 +42,7 @@ namespace Exceptionless.Core.Services {
         public async Task SaveStackUsagesAsync(bool sendNotifications = true, CancellationToken cancellationToken = default) {
             string occurrenceSetCacheKey = GetStackOccurrenceSetCacheKey();
             var stackUsageSet = await _cache.GetListAsync<(string OrganizationId, string ProjectId, string StackId)>(occurrenceSetCacheKey).AnyContext();
-            if (!stackUsageSet.HasValue) 
+            if (!stackUsageSet.HasValue)
                 return;
 
             foreach (var (organizationId, projectId, stackId) in stackUsageSet.Value) {
@@ -59,8 +59,8 @@ namespace Exceptionless.Core.Services {
 
                 await Task.WhenAll(
                     removeFromSetTask,
-                    countTask, 
-                    minDateTask, 
+                    countTask,
+                    minDateTask,
                     maxDateTask
                 ).AnyContext();
 
@@ -82,7 +82,7 @@ namespace Exceptionless.Core.Services {
                     if (!await _stackRepository.IncrementEventCounterAsync(organizationId, projectId, stackId, occurrenceMinDate, occurrenceMaxDate, occurrenceCount, sendNotifications).AnyContext()) {
                         shouldRetry = true;
                         await IncrementStackUsageAsync(organizationId, projectId, stackId, occurrenceMinDate, occurrenceMaxDate, occurrenceCount).AnyContext();
-                    } else if (_logger.IsEnabled(LogLevel.Trace)) {
+                    } else {
                         _logger.LogTrace("Increment event count {OccurrenceCount} for organization:{OrganizationId} project:{ProjectId} stack:{StackId} with Min Date:{OccurrenceMinDate} Max Date:{OccurrenceMaxDate}", occurrenceCount, organizationId, projectId, stackId, occurrenceMinDate, occurrenceMaxDate);
                     }
                 } catch(Exception ex) {

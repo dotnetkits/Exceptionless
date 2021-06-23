@@ -1,5 +1,5 @@
 # Exceptionless
-[![Build](https://github.com/exceptionless/Exceptionless/workflows/Build/badge.svg)](https://github.com/exceptionless/Exceptionless/actions)
+[![Build](https://github.com/exceptionless/Exceptionless/workflows/Build/badge.svg?branch=master)](https://github.com/exceptionless/Exceptionless/actions?query=branch%3Amaster)
 [![Discord](https://img.shields.io/discord/715744504891703319)](https://discord.gg/6HxgFCx)
 [![Donate](https://img.shields.io/badge/donorbox-donate-blue.svg)](https://donorbox.org/exceptionless?recurring=true)
 
@@ -8,12 +8,12 @@ The definition of the word exceptionless is: to be without exception. [Exception
 ⭐️ We appreciate your star, it helps!
 
 ## Using Exceptionless
-Refer to the [Exceptionless documentation wiki](https://github.com/exceptionless/Exceptionless/wiki/Getting-Started).
+Refer to the [Exceptionless documentation](https://exceptionless.com/docs/).
 
 ## Hosting Options
 We provide very reasonably priced hosting at [Exceptionless](http://exceptionless.com). By using our hosted service, you are supporting the project and helping it get better! We also provide set up and support services.
 
-Exceptionless can be run locally as simply as `docker run --rm -it -p 5000:80 exceptionless/exceptionless:6.1.0`. This will run a completely self-contained simple instance of Exceptionless. It is only suitable for testing purposes since it will not persist data. For more complete setups, check out the [self hosting documentation](https://github.com/exceptionless/Exceptionless/wiki/Self-Hosting). Also, if you want to support the project while self hosting you can send us a pull request or [donation](https://donorbox.org/exceptionless?recurring=true).
+Exceptionless can be run locally as simply as `docker run --rm -it -p 5000:80 exceptionless/exceptionless:latest`. This will run a completely self-contained simple instance of Exceptionless. It is only suitable for testing purposes since it will not persist data. For more complete setups, check out the [self hosting documentation](https://exceptionless.com/docs/self-hosting/). Also, if you want to support the project while self hosting you can send us a pull request or [donation](https://donorbox.org/exceptionless?recurring=true).
 
 ## Contributing
 _In appreciation for anyone who submits a non-trivial pull request, we will give you a free [Exceptionless](http://exceptionless.com) paid plan for a year. After your pull request is accepted, simply send an email to team@exceptionless.io with the name of your organization and we will upgrade you to a paid plan._
@@ -30,8 +30,11 @@ _In appreciation for anyone who submits a non-trivial pull request, we will give
   - When running locally in `Development` mode, a global administrator user `test@test.com` is automatically created with password `tester`.
 
 ## Thanks
-Thanks to the community for your support!
+
+Thanks to all the people who have contributed!
+
+[![contributors](https://contributors-img.web.app/image?repo=exceptionless/exceptionless)](https://github.com/exceptionless/exceptionless/graphs/contributors)
 
 Thanks to [JetBrains](http://jetbrains.com) for a community [WebStorm](https://www.jetbrains.com/webstorm/) and [ReSharper](https://www.jetbrains.com/resharper/) license to use on this project. It's the best JavaScript IDE/Visual Studio productivity enhancement hands down.
 
-Thanks to [Red Gate](http://www.red-gate.com) for providing an open source license for a [.NET Developer Bundle](http://www.red-gate.com/products/dotnet-development/). It's an indepensible tool when you need to track down a performance/memory issue.
+Thanks to [Red Gate](http://www.red-gate.com) for providing an open source license for a [.NET Developer Bundle](http://www.red-gate.com/products/dotnet-development/). It's an indispensible tool when you need to track down a performance/memory issue.

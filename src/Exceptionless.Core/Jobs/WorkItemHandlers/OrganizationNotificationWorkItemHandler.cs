@@ -8,7 +8,7 @@ using Exceptionless.Core.Models;
 using Exceptionless.Core.Models.WorkItems;
 using Exceptionless.Core.Repositories;
 using Foundatio.Caching;
-using Foundatio.Hosting.Startup;
+using Foundatio.Extensions.Hosting.Startup;
 using Foundatio.Jobs;
 using Foundatio.Lock;
 using Foundatio.Messaging;
@@ -30,8 +30,7 @@ namespace Exceptionless.Core.Jobs.WorkItemHandlers {
 
         public Task RunAsync(CancellationToken token) {
             return _subscriber.SubscribeAsync<PlanOverage>(overage => {
-                if (_logger.IsEnabled(LogLevel.Information))
-                    _logger.LogInformation("Enqueueing plan overage work item for organization: {OrganizationId} IsOverHourlyLimit: {IsOverHourlyLimit} IsOverMonthlyLimit: {IsOverMonthlyLimit}", overage.OrganizationId, overage.IsHourly, !overage.IsHourly);
+                _logger.LogInformation("Enqueueing plan overage work item for organization: {OrganizationId} IsOverHourlyLimit: {IsOverHourlyLimit} IsOverMonthlyLimit: {IsOverMonthlyLimit}", overage.OrganizationId, overage.IsHourly, !overage.IsHourly);
 
                 return _workItemQueue.EnqueueAsync(new OrganizationNotificationWorkItem {
                     OrganizationId = overage.OrganizationId,

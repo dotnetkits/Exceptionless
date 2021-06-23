@@ -9,10 +9,6 @@ namespace Exceptionless.Core.Queries.Validation {
     public sealed class PersistentEventQueryValidator : QueryValidator {
         private readonly HashSet<string> _freeQueryFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
             "date",
-            EventIndex.Alias.IsFixed,
-            "is_fixed",
-            EventIndex.Alias.IsHidden,
-            "is_hidden",
             "type",
             EventIndex.Alias.ReferenceId,
             "reference_id",
@@ -21,7 +17,8 @@ namespace Exceptionless.Core.Queries.Validation {
             EventIndex.Alias.ProjectId,
             "project_id",
             EventIndex.Alias.StackId,
-            "stack_id"
+            "stack_id",
+            "status"
         };
 
         private static readonly HashSet<string> _freeAggregationFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
@@ -34,7 +31,8 @@ namespace Exceptionless.Core.Queries.Validation {
             "stack",
             EventIndex.Alias.StackId,
             EventIndex.Alias.User,
-            "data.@user.identity"
+            "data.@user.identity",
+            "status"
         };
 
         private static readonly HashSet<string> _allowedAggregationFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
@@ -42,13 +40,10 @@ namespace Exceptionless.Core.Queries.Validation {
             "source",
             "tags",
             "type",
+            "status",
             "value",
             "count",
             "geo",
-            EventIndex.Alias.IsFixed,
-            "is_fixed",
-            EventIndex.Alias.IsHidden,
-            "is_hidden",
             EventIndex.Alias.IsFirstOccurrence,
             "is_first_occurrence",
             EventIndex.Alias.OrganizationId,

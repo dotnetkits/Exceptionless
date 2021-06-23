@@ -12,8 +12,13 @@ Serilog:
       Exceptionless.Web.Security.ApiKeyAuthenticationHandler: Warning
       Foundatio.Utility.ScheduledTimer: Warning
       Foundatio.Metrics: Warning
+      #Exceptionless.Core.Repositories.EventRepository: Verbose
+      #Exceptionless.Core.Repositories.StackRepository: Verbose
+      #Exceptionless.Core.Repositories: Verbose
   WriteTo:
   - Name: Console
+    Args: 
+      theme: "Serilog.Sinks.SystemConsole.Themes.AnsiConsoleTheme::Literate, Serilog.Sinks.Console"
   Enrich:
   - FromLogContext
   - WithMachineName
